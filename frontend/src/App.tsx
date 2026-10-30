@@ -2,7 +2,10 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { TabBar } from "./components/TabBar";
 import { Card, Skeleton } from "./components/ui";
 import { Placeholder } from "./routes/Placeholder";
+import { Savings } from "./routes/Savings";
+import { Settings } from "./routes/Settings";
 import { Summary } from "./routes/Summary";
+import { Transactions } from "./routes/Transactions";
 import { SessionProvider, useSession } from "./session";
 
 export function App() {
@@ -59,9 +62,9 @@ function Main() {
         <Route index element={<Navigate to="/summary" replace />} />
         <Route path="summary" element={<Summary />} />
         <Route path="analysis" element={<Placeholder title="วิเคราะห์" />} />
-        <Route path="transactions" element={<Placeholder title="รายการ" />} />
-        <Route path="savings" element={<Placeholder title="การออม" />} />
-        <Route path="settings" element={<Placeholder title="ตั้งค่า" />} />
+        <Route path="transactions" element={<Transactions />} />
+        <Route path="savings" element={<Savings />} />
+        <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/summary" replace />} />
       </Routes>
     </main>
