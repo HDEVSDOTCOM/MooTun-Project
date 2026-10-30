@@ -36,6 +36,31 @@ export interface RecentTransactions {
   as_of: string;
 }
 
+export interface MonthTransactions {
+  year_ce: number;
+  year_be: number;
+  month: number;
+  type: "income" | "expense" | null;
+  limit: number;
+  truncated: boolean;
+  items: TransactionItem[];
+  as_of: string;
+}
+
+export interface SavingsGoal {
+  title: string;
+  target_baht: string;
+  saved_baht: string;
+  remaining_baht: string;
+  progress_percent: string;
+  deadline: string | null;
+}
+
+export interface Savings {
+  goal: SavingsGoal | null;
+  as_of: string;
+}
+
 export interface CategoryTotals {
   type: "income" | "expense";
   total_baht: string;

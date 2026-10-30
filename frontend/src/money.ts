@@ -32,3 +32,29 @@ export function calendarDate(value: string): string {
 export function monthParam(yearCe: number, month: number): string {
   return `${yearCe}-${String(month).padStart(2, "0")}`;
 }
+
+export interface YearMonth {
+  yearCe: number;
+  month: number;
+}
+
+// Matches the API's accepted range (1900-01 .. 2099-12).
+export function shiftMonth({ yearCe, month }: YearMonth, delta: number): YearMonth | null {
+  const index = yearCe * 12 + (month - 1) + delta;
+  const next = { yearCe: Math.floor(index / 12), month: (index % 12) + 1 };
+  return next.yearCe < 1900 || next.yearCe > 2099 ? null : next;
+}
+
+// Fallback when the server summary is unavailable: today's month in Bangkok.
+export function bangkokMonth(now: Date = new Date()): YearMonth {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit" })
+    .formatToParts(now);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return { yearCe: value("year"), month: value("month") };
+}
+
+export function percentWidth(value: string): string {
+  // Display-only geometry from an exact percent string; clamp to the drawable range.
+  const number = Number(value);
+  return `${Math.min(100, Math.max(0, Number.isFinite(number) ? number : 0))}%`;
+}

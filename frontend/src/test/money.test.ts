@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baht, calendarDate, isNegative, monthLabel, monthParam } from "../money";
+import { bangkokMonth, baht, calendarDate, isNegative, monthLabel, monthParam, percentWidth, shiftMonth } from "../money";
 
 describe("baht", () => {
   it("groups exact decimal strings without float conversion", () => {
@@ -29,5 +29,25 @@ describe("dates", () => {
     expect(monthLabel(10, 2569)).toBe("ต.ค. 2569");
     expect(calendarDate("2026-01-02")).toBe("2 ม.ค. 2569");
     expect(monthParam(2026, 3)).toBe("2026-03");
+  });
+});
+
+describe("months", () => {
+  it("shifts across year boundaries within the API range", () => {
+    expect(shiftMonth({ yearCe: 2026, month: 1 }, -1)).toEqual({ yearCe: 2025, month: 12 });
+    expect(shiftMonth({ yearCe: 2026, month: 12 }, 1)).toEqual({ yearCe: 2027, month: 1 });
+    expect(shiftMonth({ yearCe: 1900, month: 1 }, -1)).toBeNull();
+    expect(shiftMonth({ yearCe: 2099, month: 12 }, 1)).toBeNull();
+  });
+
+  it("uses Bangkok time for the fallback month", () => {
+    expect(bangkokMonth(new Date("2026-01-31T18:00:00Z"))).toEqual({ yearCe: 2026, month: 2 });
+    expect(bangkokMonth(new Date("2026-01-31T16:59:59Z"))).toEqual({ yearCe: 2026, month: 1 });
+  });
+
+  it("clamps percent geometry", () => {
+    expect(percentWidth("49.10")).toBe("49.1%");
+    expect(percentWidth("150.00")).toBe("100%");
+    expect(percentWidth("nope")).toBe("0%");
   });
 });

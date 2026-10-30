@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import type { CategoryTotals, RecentTransactions, Summary as SummaryData } from "../api";
 import { Card, CardTitle, Empty, InlineError, Skeleton } from "../components/ui";
-import { baht, calendarDate, isNegative, monthLabel, monthParam } from "../money";
+import { TransactionRow, transactionKey } from "../components/TransactionRow";
+import { baht, isNegative, monthLabel, monthParam, percentWidth } from "../money";
 import { useMe, useSession } from "../session";
 
 export function Summary() {
@@ -63,7 +64,7 @@ function TopCategories({ data }: { data: SummaryData }) {
                 <span className="tabular-nums font-medium">{baht(item.amount_baht)}</span>
               </div>
               <div className="mt-1 h-2 overflow-hidden rounded-full bg-brand-soft">
-                <div className="h-full rounded-full bg-brand" style={{ width: `${item.share_percent}%` }} />
+                <div className="h-full rounded-full bg-brand" style={{ width: percentWidth(item.share_percent) }} />
               </div>
             </li>
           ))}
@@ -85,17 +86,7 @@ function Recent() {
       {data && data.items.length === 0 && <Empty title="ยังไม่มีรายการ" hint="จดผ่านแชตกับน้องหมูตุ๋นได้เลย" />}
       {data && data.items.length > 0 && (
         <ul className="divide-y divide-line">
-          {data.items.map((item) => (
-            <li key={`${item.created_at}-${item.occurred_on}-${item.amount_baht}-${item.category}`} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <p className="truncate font-medium">{item.description ?? item.category}</p>
-                <p className="text-xs text-muted">{item.category} · {calendarDate(item.occurred_on)}</p>
-              </div>
-              <p className={`shrink-0 tabular-nums font-semibold ${item.transaction_type === "income" ? "text-income" : "text-expense"}`}>
-                {item.transaction_type === "income" ? "+" : "−"}{baht(item.amount_baht)}
-              </p>
-            </li>
-          ))}
+          {data.items.map((item, index) => <TransactionRow key={transactionKey(item, index)} item={item} />)}
         </ul>
       )}
     </Card>
