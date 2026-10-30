@@ -61,6 +61,20 @@ export interface Savings {
   as_of: string;
 }
 
+export interface MonthlySeries {
+  months: number;
+  items: {
+    year_ce: number;
+    year_be: number;
+    month: number;
+    income_baht: string;
+    expense_baht: string;
+    income_satang: number;
+    expense_satang: number;
+  }[];
+  as_of: string;
+}
+
 export interface CategoryTotals {
   type: "income" | "expense";
   total_baht: string;
