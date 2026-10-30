@@ -42,6 +42,11 @@ CHANNEL = "1234567890"
 LIFF_ID = CHANNEL + "-Developing"
 NOW = datetime(2026, 10, 10, 10, 30, tzinfo=timezone.utc)
 PATHS = ("/api/me/summary", "/api/me/transactions/recent", "/api/me/savings")
+QUERY_PATHS = (
+    "/api/me/transactions?month=2026-10", "/api/me/transactions?month=2026-10&type=income",
+    "/api/me/analytics/monthly", "/api/me/analytics/monthly?months=12",
+    "/api/me/analytics/categories?month=2026-10&type=expense",
+)
 
 
 def raw_token(subject):
@@ -446,7 +451,8 @@ def test_all_tables_byte_identical_and_no_mutating_sql_for_repeated_web_reads(we
     def forbidden(*args, **kwargs):
         pytest.fail("Web requests must not call mutation, cleanup, export, or webhook helpers")
 
-    permitted = {"monthly_summary", "list_recent_transactions", "get_savings_goal"}
+    permitted = {"monthly_summary", "list_recent_transactions", "get_savings_goal",
+                 "list_month_transactions", "monthly_totals_series", "category_totals"}
     # Make accidentally importing/calling any other public repository helper fail.
     for name in dir(repository):
         value = getattr(repository, name)
@@ -458,7 +464,7 @@ def test_all_tables_byte_identical_and_no_mutating_sql_for_repeated_web_reads(we
     state["sql"].clear()
     for _ in range(3):
         for token in (TOKEN_A, TOKEN_B, TOKEN_EMPTY, TOKEN_D):
-            for path in PATHS:
+            for path in (*PATHS, *QUERY_PATHS):
                 assert client.get(path, headers=headers(token)).status_code == 200
         for path in ("/app/", "/app/config.json", "/app/assets/app.js", "/app/assets/styles.css"):
             assert client.get(path).status_code == 200

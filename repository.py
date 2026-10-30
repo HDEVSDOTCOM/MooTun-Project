@@ -400,6 +400,126 @@ def update_latest_transaction(
         return item
 
 
+def _month_bounds(year: int, month: int) -> tuple[date, date]:
+    try:
+        start = date(year, month, 1)
+    except ValueError as exc:
+        raise ValueError("year and month must form a valid calendar month") from exc
+    return start, date(year, month, monthrange(year, month)[1])
+
+
+def _validate_transaction_type(transaction_type: str | None) -> None:
+    if transaction_type is not None and transaction_type not in ("income", "expense"):
+        raise ValueError("transaction_type must be income or expense")
+
+
+def list_month_transactions(
+    line_user_id: str,
+    year: int,
+    month: int,
+    transaction_type: str | None = None,
+    *,
+    limit: int = 500,
+    session: Session | None = None,
+) -> list[Transaction]:
+    """Return up to ``limit + 1`` rows so callers can detect truncation."""
+
+    user_id = _validate_user_id(line_user_id)
+    _validate_transaction_type(transaction_type)
+    if limit < 1 or limit > 500:
+        raise ValueError("limit must be between 1 and 500")
+    start, end = _month_bounds(year, month)
+    statement = select(Transaction).where(
+        Transaction.line_user_id == user_id,
+        Transaction.occurred_on >= start,
+        Transaction.occurred_on <= end,
+    )
+    if transaction_type is not None:
+        statement = statement.where(Transaction.transaction_type == transaction_type)
+    statement = statement.order_by(
+        Transaction.occurred_on.desc(),
+        Transaction.created_at.desc(),
+        Transaction.id.desc(),
+    ).limit(limit + 1)
+    with _session_context(session) as db:
+        return list(db.scalars(statement).all())
+
+
+def monthly_totals_series(
+    line_user_id: str,
+    end_year: int,
+    end_month: int,
+    months: int,
+    *,
+    session: Session | None = None,
+) -> list[dict[str, int]]:
+    """Income/expense satang per calendar month, oldest first, ending at the given month."""
+
+    user_id = _validate_user_id(line_user_id)
+    if months < 1 or months > 12:
+        raise ValueError("months must be between 1 and 12")
+    _, end = _month_bounds(end_year, end_month)
+    index = end_year * 12 + end_month - 1 - (months - 1)
+    keys = [((index + offset) // 12, (index + offset) % 12 + 1) for offset in range(months)]
+    start, _ = _month_bounds(*keys[0])
+
+    statement = (
+        select(
+            Transaction.occurred_on,
+            Transaction.transaction_type,
+            func.coalesce(func.sum(Transaction.amount_satang), 0),
+        )
+        .where(
+            Transaction.line_user_id == user_id,
+            Transaction.occurred_on >= start,
+            Transaction.occurred_on <= end,
+        )
+        .group_by(Transaction.occurred_on, Transaction.transaction_type)
+    )
+    with _session_context(session) as db:
+        rows = db.execute(statement).all()
+
+    series = {key: {"year": key[0], "month": key[1], "income": 0, "expense": 0} for key in keys}
+    for occurred_on, transaction_type, total_satang in rows:
+        series[(occurred_on.year, occurred_on.month)][transaction_type] += int(total_satang)
+    return [series[key] for key in keys]
+
+
+def category_totals(
+    line_user_id: str,
+    year: int,
+    month: int,
+    transaction_type: str,
+    *,
+    session: Session | None = None,
+) -> list[dict[str, Any]]:
+    """Per-category satang totals for one month, largest first."""
+
+    user_id = _validate_user_id(line_user_id)
+    if transaction_type is None:
+        raise ValueError("transaction_type is required")
+    _validate_transaction_type(transaction_type)
+    start, end = _month_bounds(year, month)
+    total = func.sum(Transaction.amount_satang)
+    statement = (
+        select(Transaction.category, total, func.count(Transaction.id))
+        .where(
+            Transaction.line_user_id == user_id,
+            Transaction.transaction_type == transaction_type,
+            Transaction.occurred_on >= start,
+            Transaction.occurred_on <= end,
+        )
+        .group_by(Transaction.category)
+        .order_by(total.desc(), Transaction.category.asc())
+    )
+    with _session_context(session) as db:
+        rows = db.execute(statement).all()
+    return [
+        {"category": category, "satang": int(satang), "transaction_count": int(count)}
+        for category, satang, count in rows
+    ]
+
+
 def monthly_summary(
     line_user_id: str,
     year: int,
@@ -408,11 +528,7 @@ def monthly_summary(
     session: Session | None = None,
 ) -> dict[str, Any]:
     user_id = _validate_user_id(line_user_id)
-    try:
-        start = date(year, month, 1)
-    except ValueError as exc:
-        raise ValueError("year and month must form a valid calendar month") from exc
-    end = date(year, month, monthrange(year, month)[1])
+    start, end = _month_bounds(year, month)
 
     statement = (
         select(
