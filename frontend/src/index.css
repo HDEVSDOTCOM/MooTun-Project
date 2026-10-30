@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Prompt", system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans Thai", system-ui, sans-serif;
+  --color-canvas: #fbf6f8;
+  --color-card: #ffffff;
+  --color-ink: #3a1f2b;
+  --color-muted: #8a6f7b;
+  --color-line: #f1e3e9;
+  --color-brand: #d81b72;
+  --color-brand-soft: #fde7f0;
+  --color-income: #1f9e74;
+  --color-income-soft: #e3f6ef;
+  --color-expense: #d81b72;
+  --color-expense-soft: #fde7f0;
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

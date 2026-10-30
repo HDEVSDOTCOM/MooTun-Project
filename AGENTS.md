@@ -5,7 +5,10 @@
 - Setup: `pip install -r requirements-dev.txt` (includes pytest)
 - Dev server: `uvicorn app:app --reload --port 8000`
 - Tests: `pytest -q`; single file: `pytest test_parser.py`; single test: `pytest test_parser.py::test_name`
-- No lint/typecheck/formatter config exists in this repo
+- Mini App frontend (`frontend/`, Vite + React + TS): `npm ci --prefix frontend`;
+  `npm run dev --prefix frontend` (proxies `/api` to :8000); `npm test --prefix frontend` (Vitest);
+  `npm run build --prefix frontend` (typecheck + build into gitignored `webapp/dist/`)
+- No Python lint/formatter config; the frontend typechecks with `tsc --noEmit`
 
 ## Architecture
 
@@ -16,6 +19,12 @@ or through deterministic semantic rules) → `repository.py` (all DB access, sco
 LINE user ID) → `messages.py` (Thai reply formatting).
 `line_api.py` handles signature verification and replies; `database.py`/`models.py`
 hold the SQLAlchemy engine and tables.
+
+Mini App: `webapp_auth.py` verifies the LIFF ID token on every `/api/me/*` request
+(per-route query allowlists via `owner_with_query`); `webapp_routes.py` serves the
+read-only APIs, the SPA shell for `/app/` and the tab paths in `SPA_TABS`, and hashed
+files from `webapp/dist/assets`. Pytest uses a stand-in dist (see the `web` fixture),
+so backend tests never need a frontend build.
 
 Phase 1B stores at most one incomplete transaction per user in
 `pending_transactions`. `parser.parse_followup()` safety-checks each new message and

@@ -15,7 +15,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import event
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from starlette.staticfiles import StaticFiles
 
 import database
 from repository import (
@@ -38,9 +37,18 @@ from webapp_auth import (
 )
 
 
-ROOT = Path(__file__).resolve().parent / "webapp"
+# Vite build output (frontend/ -> webapp/dist/), produced on deploy and gitignored.
+ROOT = Path(__file__).resolve().parent / "webapp" / "dist"
 BANGKOK = ZoneInfo("Asia/Bangkok")
 router = APIRouter()
+# Client-side routes that return the SPA shell. Must match TABS in frontend/src/components/TabBar.tsx.
+SPA_TABS = ("summary", "analysis", "transactions", "savings", "settings")
+# Vite emits flat, hashed file names. No slashes, no leading dot, fixed extensions.
+ASSET_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}\.(?:js|css|woff2?|svg|png|webp)")
+ASSET_TYPES = {
+    "js": "text/javascript", "css": "text/css", "woff2": "font/woff2", "woff": "font/woff",
+    "svg": "image/svg+xml", "png": "image/png", "webp": "image/webp",
+}
 MONTH_LIMIT = 500
 ANALYTICS_MONTHS = ("3", "6", "12")
 MONTH = QueryRule(re.compile(r"(?:19|20)[0-9]{2}-(?:0[1-9]|1[0-2])"), required=True)
@@ -51,6 +59,7 @@ TYPE = QueryRule(re.compile(r"income|expense"))
 CSP = (
     "default-src 'none'; base-uri 'none'; object-src 'none'; "
     "script-src 'self' https://static.line-scdn.net; style-src 'self'; "
+    "font-src 'self'; img-src 'self' data:; "
     "connect-src 'self' https://api.line.me https://access.line.me "
     "https://liffsdk.line-scdn.net; "
     "frame-src https://access.line.me https://liff.line.me; "
@@ -151,10 +160,26 @@ def _satang_baht(satang: int) -> str:
     return money(Decimal(satang) / Decimal(100))
 
 
+def _shell(request: Request) -> FileResponse:
+    require_webapp(request)
+    index = ROOT / "index.html"
+    if not index.is_file():
+        raise WebAppError(503, "WEBAPP_UNAVAILABLE")
+    return FileResponse(index, media_type="text/html")
+
+
 @router.get("/app/", include_in_schema=False)
 def shell(request: Request):
+    return _shell(request)
+
+
+@router.get("/app/assets/{name}", include_in_schema=False)
+def asset(name: str, request: Request):
     require_webapp(request)
-    return FileResponse(ROOT / "index.html", media_type="text/html")
+    path = ROOT / "assets" / name
+    if ASSET_NAME.fullmatch(name) is None or not path.is_file():
+        raise WebAppError(404, "NOT_FOUND")
+    return FileResponse(path, media_type=ASSET_TYPES[name.rsplit(".", 1)[1]])
 
 
 @router.get("/app/config.json", include_in_schema=False)
@@ -163,10 +188,13 @@ def frontend_config(request: Request):
     return {"liff_id": config.liff_id, "environment": "Developing"}
 
 
-class AppAssets(StaticFiles):
-    async def __call__(self, scope, receive, send):
-        require_webapp(Request(scope))
-        await super().__call__(scope, receive, send)
+# Declared after /app/config.json so the literal path wins.
+@router.get("/app/{tab}", include_in_schema=False)
+def tab_shell(tab: str, request: Request):
+    if tab not in SPA_TABS:
+        require_webapp(request)
+        raise WebAppError(404, "NOT_FOUND")
+    return _shell(request)
 
 
 @router.get("/api/me/summary")
@@ -322,4 +350,3 @@ def register_webapp(app: FastAPI) -> None:
         return response
 
     app.include_router(router)
-    app.mount("/app/assets", AppAssets(directory=ROOT / "assets"), name="webapp-assets")
