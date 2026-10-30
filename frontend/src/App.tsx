@@ -1,12 +1,15 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { TabBar } from "./components/TabBar";
 import { Card, Skeleton } from "./components/ui";
-import { Placeholder } from "./routes/Placeholder";
 import { Savings } from "./routes/Savings";
 import { Settings } from "./routes/Settings";
 import { Summary } from "./routes/Summary";
 import { Transactions } from "./routes/Transactions";
 import { SessionProvider, useSession } from "./session";
+
+// Chart.js only loads when the Analysis tab opens.
+const Analysis = lazy(() => import("./routes/Analysis").then((module) => ({ default: module.Analysis })));
 
 export function App() {
   return (
@@ -61,7 +64,7 @@ function Main() {
       <Routes>
         <Route index element={<Navigate to="/summary" replace />} />
         <Route path="summary" element={<Summary />} />
-        <Route path="analysis" element={<Placeholder title="วิเคราะห์" />} />
+        <Route path="analysis" element={<Suspense fallback={<Skeleton className="h-72 rounded-3xl" />}><Analysis /></Suspense>} />
         <Route path="transactions" element={<Transactions />} />
         <Route path="savings" element={<Savings />} />
         <Route path="settings" element={<Settings />} />
