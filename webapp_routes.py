@@ -1,7 +1,8 @@
-"""Static web shell and the three bounded, rollback-only financial reads."""
+"""Static web shell and the bounded, rollback-only financial reads."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -17,11 +18,21 @@ from sqlalchemy.orm import Session
 from starlette.staticfiles import StaticFiles
 
 import database
-from repository import get_savings_goal, list_recent_transactions, monthly_summary
+from repository import (
+    category_totals,
+    get_savings_goal,
+    list_month_transactions,
+    list_recent_transactions,
+    monthly_summary,
+    monthly_totals_series,
+)
 from webapp_auth import (
     ERROR_MESSAGES,
+    OwnerQuery,
+    QueryRule,
     WebAppError,
     is_web_path,
+    owner_with_query,
     require_webapp,
     verified_owner,
 )
@@ -30,6 +41,10 @@ from webapp_auth import (
 ROOT = Path(__file__).resolve().parent / "webapp"
 BANGKOK = ZoneInfo("Asia/Bangkok")
 router = APIRouter()
+MONTH_LIMIT = 500
+ANALYTICS_MONTHS = ("3", "6", "12")
+MONTH = QueryRule(re.compile(r"(?:19|20)[0-9]{2}-(?:0[1-9]|1[0-2])"), required=True)
+TYPE = QueryRule(re.compile(r"income|expense"))
 # SDK 2.31.2's init/login use the LINE API/Access origins and its translation CDN.
 # The SDK loads platform bridge extensions from static.line-scdn.net.
 # No UTS/analytics origin, wildcard, inline script, or eval permission is granted.
@@ -76,8 +91,7 @@ def _only_select(state) -> None:
         raise ReadOnlyViolation("Web sessions only allow SELECT")
 
 
-def read_session(owner: Annotated[str, Depends(verified_owner)]) -> Iterator[Session]:
-    # Authentication (including query validation) completes before session creation.
+def _read_session() -> Iterator[Session]:
     session = ReadOnlySession(bind=database.engine, autoflush=False, expire_on_commit=False)
     event.listen(session, "do_orm_execute", _only_select)
     try:
@@ -91,8 +105,50 @@ def read_session(owner: Annotated[str, Depends(verified_owner)]) -> Iterator[Ses
             session.close()
 
 
+def read_session(owner: Annotated[str, Depends(verified_owner)]) -> Iterator[Session]:
+    # Authentication (including query validation) completes before session creation.
+    yield from _read_session()
+
+
+def read_session_after(authenticate):
+    """A read session that opens only after ``authenticate`` (cached per request) succeeds."""
+
+    # A default (not Annotated) because postponed annotations cannot see the closure.
+    def dependency(_: OwnerQuery = Depends(authenticate)) -> Iterator[Session]:
+        yield from _read_session()
+
+    return dependency
+
+
 Owner = Annotated[str, Depends(verified_owner)]
 ReadSession = Annotated[Session, Depends(read_session)]
+
+month_query = owner_with_query({"month": MONTH, "type": TYPE})
+months_query = owner_with_query({"months": QueryRule(re.compile("|".join(ANALYTICS_MONTHS)))})
+MonthQuery = Annotated[OwnerQuery, Depends(month_query)]
+MonthsQuery = Annotated[OwnerQuery, Depends(months_query)]
+MonthSession = Annotated[Session, Depends(read_session_after(month_query))]
+MonthsSession = Annotated[Session, Depends(read_session_after(months_query))]
+
+
+def _month_param(query: OwnerQuery) -> tuple[int, int]:
+    year, month = query.params["month"].split("-")
+    return int(year), int(month)
+
+
+def _transaction_item(item) -> dict:
+    return {
+        "transaction_type": item.transaction_type,
+        "amount_baht": money(item.amount),
+        "category": item.category,
+        "description": item.description,
+        "occurred_on": item.occurred_on.isoformat(),
+        "created_at": bangkok_timestamp(item.created_at),
+    }
+
+
+def _satang_baht(satang: int) -> str:
+    return money(Decimal(satang) / Decimal(100))
 
 
 @router.get("/app/", include_in_schema=False)
@@ -138,16 +194,78 @@ def recent(owner: Owner, session: ReadSession):
     items = list_recent_transactions(owner, limit=5, session=session)
     return {
         "limit": 5,
+        "items": [_transaction_item(item) for item in items],
+        "as_of": now.isoformat(),
+    }
+
+
+@router.get("/api/me/transactions")
+def month_transactions(query: MonthQuery, session: MonthSession):
+    now = utc_now()
+    year, month = _month_param(query)
+    transaction_type = query.params.get("type")
+    items = list_month_transactions(
+        query.owner, year, month, transaction_type, limit=MONTH_LIMIT, session=session
+    )
+    return {
+        "year_ce": year,
+        "year_be": year + 543,
+        "month": month,
+        "type": transaction_type,
+        "limit": MONTH_LIMIT,
+        "truncated": len(items) > MONTH_LIMIT,
+        "items": [_transaction_item(item) for item in items[:MONTH_LIMIT]],
+        "as_of": now.isoformat(),
+    }
+
+
+@router.get("/api/me/analytics/monthly")
+def analytics_monthly(query: MonthsQuery, session: MonthsSession):
+    now = utc_now()
+    local = now.astimezone(BANGKOK)
+    months = int(query.params.get("months", "6"))
+    series = monthly_totals_series(query.owner, local.year, local.month, months, session=session)
+    return {
+        "months": months,
         "items": [
             {
-                "transaction_type": item.transaction_type,
-                "amount_baht": money(item.amount),
-                "category": item.category,
-                "description": item.description,
-                "occurred_on": item.occurred_on.isoformat(),
-                "created_at": bangkok_timestamp(item.created_at),
+                "year_ce": row["year"],
+                "year_be": row["year"] + 543,
+                "month": row["month"],
+                "income_baht": _satang_baht(row["income"]),
+                "expense_baht": _satang_baht(row["expense"]),
+                "income_satang": row["income"],
+                "expense_satang": row["expense"],
             }
-            for item in items
+            for row in series
+        ],
+        "as_of": now.isoformat(),
+    }
+
+
+@router.get("/api/me/analytics/categories")
+def analytics_categories(query: MonthQuery, session: MonthSession):
+    now = utc_now()
+    year, month = _month_param(query)
+    transaction_type = query.params.get("type", "expense")
+    rows = category_totals(query.owner, year, month, transaction_type, session=session)
+    total = sum(row["satang"] for row in rows)
+    return {
+        "year_ce": year,
+        "year_be": year + 543,
+        "month": month,
+        "type": transaction_type,
+        "total_baht": _satang_baht(total),
+        "total_satang": total,
+        "items": [
+            {
+                "category": row["category"],
+                "amount_baht": _satang_baht(row["satang"]),
+                "amount_satang": row["satang"],
+                "transaction_count": row["transaction_count"],
+                "share_percent": money(Decimal(row["satang"]) * 100 / Decimal(total)),
+            }
+            for row in rows
         ],
         "as_of": now.isoformat(),
     }

@@ -98,7 +98,7 @@ def token_has_valid_shape(token: str) -> bool:
         return False
 
 
-async def verified_owner(request: Request) -> str:
+async def _verified_subject(request: Request) -> str:
     config = require_webapp(request)
     headers = request.headers.getlist("authorization")
     if len(headers) != 1:
@@ -140,6 +140,49 @@ async def verified_owner(request: Request) -> str:
     if not isinstance(subject, str) or LINE_SUBJECT.fullmatch(subject) is None:
         raise WebAppError(401, "UNAUTHORIZED")
     # Preserve the exact verified identity, including case. No owner override exists.
+    return subject
+
+
+async def verified_owner(request: Request) -> str:
+    subject = await _verified_subject(request)
     if request.query_params:
         raise WebAppError(400, "INVALID_REQUEST")
     return subject
+
+
+@dataclass(frozen=True)
+class QueryRule:
+    pattern: re.Pattern[str]
+    required: bool = False
+
+
+@dataclass(frozen=True)
+class OwnerQuery:
+    owner: str
+    params: dict[str, str]
+
+
+def owner_with_query(rules: dict[str, QueryRule]):
+    """Verify the owner, then accept only the named, well-formed query parameters.
+
+    Unknown or repeated names and malformed values are rejected before any
+    session is created. No rule may name an owner; identity comes only from LINE.
+    """
+
+    async def dependency(request: Request) -> OwnerQuery:
+        subject = await _verified_subject(request)
+        items = request.query_params.multi_items()
+        names = [name for name, _ in items]
+        if len(names) != len(set(names)) or any(name not in rules for name in names):
+            raise WebAppError(400, "INVALID_REQUEST")
+        params = dict(items)
+        for name, rule in rules.items():
+            value = params.get(name)
+            if value is None:
+                if rule.required:
+                    raise WebAppError(400, "INVALID_REQUEST")
+            elif rule.pattern.fullmatch(value) is None:
+                raise WebAppError(400, "INVALID_REQUEST")
+        return OwnerQuery(subject, params)
+
+    return dependency
