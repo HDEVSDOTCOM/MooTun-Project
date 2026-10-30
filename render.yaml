@@ -2,7 +2,8 @@ services:
   - type: web
     name: mootoon-line-bot
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    # Node/npm ship with Render native runtimes; version from .node-version.
+    buildCommand: pip install -r requirements.txt && npm ci --prefix frontend && npm run build --prefix frontend
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /ready
     envVars:

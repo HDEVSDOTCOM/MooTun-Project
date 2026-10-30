@@ -87,6 +87,20 @@ uvicorn app:app --reload --port 8000
 pytest -q
 ```
 
+## Mini App (LIFF)
+
+หน้าเว็บใน LINE อยู่ใน `frontend/` (Vite + React + TypeScript) ต้องมี Node 24 ขึ้นไป
+
+```bash
+npm ci --prefix frontend
+npm run dev --prefix frontend      # http://localhost:5173/app/ (proxy /api ไปที่ :8000)
+npm test --prefix frontend
+npm run build --prefix frontend    # สร้างไฟล์ไว้ที่ webapp/dist/ ให้ FastAPI เสิร์ฟที่ /app/
+```
+
+การล็อกอิน LINE ต้องเปิดผ่าน LIFF URL ที่ชี้มายัง HTTPS (เช่น tunnel) ตั้ง `WEBAPP_ENABLED=true`,
+`MINIAPP_DEVELOPING_LIFF_ID` และ `MINIAPP_DEVELOPING_CHANNEL_ID` ใน `.env`
+
 ## Deploy บน Render
 
 1. สร้าง GitHub repository และ push ไฟล์ทั้งหมด ยกเว้น `.env`

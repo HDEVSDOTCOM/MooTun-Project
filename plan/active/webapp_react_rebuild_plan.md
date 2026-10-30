@@ -1,6 +1,6 @@
 # MooTun Mini App — React Rebuild (Phase 2C)
 
-**Status:** `APPROVED FOR BUILD` (owner, 2026-10-30) — step 1 (backend reads) implemented
+**Status:** `APPROVED FOR BUILD` (owner, 2026-10-30) — steps 1–2 implemented; deploy option 1 (Render builds) chosen
 **Repository baseline:** `main` at `888d572` (LINE Mini App read-only foundation)
 **Stack decision (owner, 2026-10-30):** Vite + React + TypeScript
 

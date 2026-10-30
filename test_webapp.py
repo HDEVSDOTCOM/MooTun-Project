@@ -87,6 +87,16 @@ def web(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "LINE_CHANNEL_ACCESS_TOKEN", "test-access")
     monkeypatch.setattr(routes, "utc_now", lambda: NOW)
     monkeypatch.setattr(auth.time, "time", lambda: NOW.timestamp())
+    # A stand-in for the Vite build so tests never depend on `npm run build`.
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text('<!doctype html><script type="module" src="/app/assets/app.js"></script>',
+                                     encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("export {};", encoding="utf-8")
+    (dist / "assets" / "styles.css").write_text("body{}", encoding="utf-8")
+    (dist / "assets" / "font-a1B2.woff2").write_bytes(b"wOF2")
+    (tmp_path / "app.py").write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(routes, "ROOT", dist)
     state = {"calls": [], "response": None, "exception": None, "sql": []}
 
     def verify(request):
@@ -531,7 +541,9 @@ def test_unexpected_web_errors_are_sanitized_and_no_store(web, monkeypatch, capl
 def test_static_config_security_headers_and_existing_routes_not_shadowed(web):
     client, _, _ = web
     for path, content_type in [("/app/", "text/html"), ("/app/assets/app.js", "javascript"),
-                               ("/app/assets/styles.css", "text/css")]:
+                               ("/app/assets/styles.css", "text/css"),
+                               ("/app/assets/font-a1B2.woff2", "font/woff2"),
+                               *[(f"/app/{tab}", "text/html") for tab in routes.SPA_TABS]]:
         response = client.get(path)
         assert response.status_code == 200
         assert content_type in response.headers["Content-Type"]
@@ -549,6 +561,20 @@ def test_static_config_security_headers_and_existing_routes_not_shadowed(web):
     csp = config.headers["Content-Security-Policy"]
     assert "*" not in csp and "unsafe-inline" not in csp and "unsafe-eval" not in csp
     assert "uts-front" not in csp
+    assert "font-src 'self'" in csp and "img-src 'self' data:" in csp
+
+
+def test_missing_build_is_controlled_unavailable(web, monkeypatch, tmp_path):
+    client, _, state = web
+    monkeypatch.setattr(routes, "ROOT", tmp_path / "no-build")
+    for path in ("/app/", "/app/summary"):
+        response = client.get(path)
+        assert response.status_code == 503
+        assert response.json()["code"] == "WEBAPP_UNAVAILABLE"
+        assert_secure(response, api=False)
+    assert client.get("/app/assets/app.js").status_code == 404
+    assert client.get("/app/config.json").status_code == 200
+    assert not state["calls"] and not state["sql"]
 
 
 @pytest.mark.parametrize("enabled", [True, False])
@@ -574,6 +600,8 @@ def test_existing_valid_csv_export_works_with_web_enabled_or_disabled(web, monke
     "/app/assets/%2e%2e/%2e%2e/app.py", "/app/assets/%2e%2e/index.html",
     "/app/assets/%2e%2e%5c%2e%2e%5c.env", "/app/assets/app.py", "/app/assets/.env",
     "/app/assets/missing.js", "/app/not-a-route", "/api/me/not-a-route",
+    "/app/assets/index.html", "/app/assets/APP.JS.map", "/app/assets/..%2fapp.py",
+    "/app/%2e%2e%2fapp.py", "/app/assets", "/app/SUMMARY", "/app/summary/extra",
 ])
 def test_traversal_and_unintended_files_never_served(web, path):
     client, _, _ = web
@@ -635,25 +663,33 @@ def test_tokens_financial_bodies_and_upstream_details_not_logged(web, caplog):
 
 
 def test_frontend_source_authentication_rendering_and_lifecycle_contract():
-    root = Path(__file__).resolve().parent / "webapp"
-    script = (root / "assets" / "app.js").read_text(encoding="utf-8")
-    html = (root / "index.html").read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parent / "frontend"
+    sources = {path.name: path.read_text(encoding="utf-8") for path in (root / "src").rglob("*.ts*")
+               if "test" not in path.parts}
+    combined = "\n".join(sources.values())
     for forbidden in ("localStorage", "sessionStorage", "IndexedDB", "indexedDB", "innerHTML",
-                      "outerHTML", "insertAdjacentHTML", "getProfile", "getDecodedIDToken", "console."):
-        assert forbidden not in script
-    assert "element.textContent = text" in script
-    assert 'const token = liff.getIDToken();' in script
-    null_branch = script.split("if (!token) {", 1)[1].split("}", 1)[0]
-    assert "authRequired();" in null_branch and "return;" in null_branch
-    assert script.index("if (!token)") < script.index('await financial("/api/me/summary"')
-    assert script.index('await financial("/api/me/summary"') < script.index('"/api/me/transactions/recent", panels')
-    assert "new AbortController()" in script and "controller.abort()" in script
-    assert "current === generation && !active.signal.aborted" in script
-    assert "if (isCurrent()) render(data)" in script
-    assert 'error.status === 401' in script and "invalidate(\"กรุณาเข้าสู่ระบบ LINE" in script
-    assert 'pagehide' in script and 'pageshow' in script and 'visibilitychange' in script
-    assert 'new URL("/app/", window.location.origin).href' in script
-    assert "Number(year) + 543" in script and "Number(goal.saved" not in script
-    assert "withLoginOnExternalBrowser: false" in script
-    assert "versions/2.31.2/sdk.js" in html
-    assert "openid" in script
+                      "dangerouslySetInnerHTML", "outerHTML", "insertAdjacentHTML", "getProfile",
+                      "getDecodedIDToken", "console.", "parseFloat", "eval("):
+        assert forbidden not in combined, forbidden
+    api, liff, session = sources["api.ts"], sources["liff.ts"], sources["session.tsx"]
+    assert 'Authorization: `Bearer ${token}`' in api
+    assert 'cache: "no-store"' in api and 'credentials: "omit"' in api
+    assert "withLoginOnExternalBrowser: false" in liff
+    assert 'new URL("/app/", window.location.origin).href' in liff
+    assert "if (liff.isLoggedIn()) liff.logout();" in liff
+    # Null token -> explicit login prompt, before the summary bootstrap.
+    null_branch = session.split("if (!token) {", 1)[1].split("}", 1)[0]
+    assert "requireAuth();" in null_branch and "return;" in null_branch
+    assert session.index("if (!token)") < session.index('getMe<Summary>("/api/me/summary"')
+    assert "error.status === 401" in session
+    for lifecycle in ("pagehide", "pageshow", "visibilitychange", "controller.current?.abort()",
+                      "local.abort()"):
+        assert lifecycle in session
+    assert "Number(year) + 543" not in combined and "year + 543" in sources["money.ts"]
+    package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    assert package["dependencies"]["@line/liff"] == "2.31.2"
+    assert all(version[0].isdigit() for version in {**package["dependencies"], **package["devDependencies"]}.values())
+    vite = (root / "vite.config.ts").read_text(encoding="utf-8")
+    assert 'base: "/app/"' in vite and 'outDir: "../webapp/dist"' in vite
+    tabs = (root / "src" / "components" / "TabBar.tsx").read_text(encoding="utf-8")
+    assert all(f'path: "{tab}"' in tabs for tab in routes.SPA_TABS)
