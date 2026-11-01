@@ -595,7 +595,7 @@ def test_delete_confirmation_deletes_bound_target_only(webhook_client):
         newer_id = newer.id
 
     assert _post_text(client, "evt-bound-confirm", "U-alice", "ยืนยัน").status_code == 200
-    assert "ลบแล้ว" in replies[-1][1]
+    assert replies[-1][1].startswith("🗑️ ลบแล้ว")
     with Session(engine) as session:
         assert session.get(Transaction, bound_target_id) is None
         assert session.get(Transaction, newer_id) is not None

@@ -48,7 +48,7 @@ def test_monthly_summary_and_delete_follow_chat_commands(db_session):
     assert monthly_summary("U-test", 2026, 9, session=db_session)["expense"] == 120.5
 
     confirmed_reply = handle_text_message("U-test", "ยืนยัน", moment, db_session)
-    assert "ลบแล้ว" in confirmed_reply
+    assert confirmed_reply.startswith("🗑️ ลบแล้ว")
     summary = monthly_summary("U-test", 2026, 9, session=db_session)
     assert summary["expense"] == 0
 

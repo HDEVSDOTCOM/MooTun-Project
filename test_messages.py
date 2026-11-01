@@ -35,9 +35,7 @@ def test_confirmation_contains_clean_transaction_fields() -> None:
     )
 
     assert "จดแล้ว! รายจ่าย 80 บาท" in message
-    assert "อาหาร" in message
-    assert "14 ก.ย. 69" in message
-    assert "ข้าวกลางวัน โรงอาหาร" in message
+    assert "ข้าวกลางวัน โรงอาหาร · อาหาร · 14 ก.ย. 69" in message
 
 
 def test_edit_confirmation_contains_clean_transaction_fields() -> None:

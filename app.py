@@ -120,7 +120,7 @@ from webapp_routes import register_webapp
 
 logger = logging.getLogger("mootoon")
 BANGKOK = ZoneInfo("Asia/Bangkok")
-PENDING_ACTION_RETRY_REPLY = "มีอีกข้อความแก้รายการนี้ไปพร้อมกัน ลองส่งใหม่อีกครั้งนะครับ"
+PENDING_ACTION_RETRY_REPLY = "มีอีกข้อความเข้ามาพร้อมกัน ลองส่งข้อความเดิมอีกครั้งนะครับ"
 PENDING_ACTION_EXPIRED_REPLY = 'คำสั่งลบหมดเวลาแล้ว ถ้ายังอยากลบ พิมพ์ "ลบล่าสุด" อีกครั้งครับ'
 
 load_dotenv()
