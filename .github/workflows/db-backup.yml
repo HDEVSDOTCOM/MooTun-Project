@@ -1,0 +1,48 @@
+name: Weekly database backup
+
+# Dumps the production database and stores it as an encrypted workflow artifact.
+# The repository is public, so the dump is never uploaded unencrypted.
+# Required repository secrets:
+#   BACKUP_DATABASE_URL  Neon direct connection string (sslmode=require)
+#   BACKUP_PASSPHRASE    long random passphrase used to encrypt the dump
+# Restore: gpg --decrypt mootoon.dump.gpg > mootoon.dump && pg_restore --no-owner -d "$URL" mootoon.dump
+
+on:
+  schedule:
+    - cron: "0 20 * * 0" # Monday 03:00 Asia/Bangkok
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Dump database
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          test -n "$DATABASE_URL" || { echo "BACKUP_DATABASE_URL is not set"; exit 1; }
+          # pg_dump 18 can dump any older server version.
+          docker run --rm -e DATABASE_URL -v "$PWD:/out" postgres:18 \
+            sh -c 'pg_dump --format=custom --no-owner --no-privileges --file=/out/mootoon.dump "$DATABASE_URL"'
+          test -s mootoon.dump
+
+      - name: Encrypt dump
+        env:
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          test -n "$PASSPHRASE" || { echo "BACKUP_PASSPHRASE is not set"; exit 1; }
+          printf '%s' "$PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --output mootoon.dump.gpg mootoon.dump
+          shred -u mootoon.dump
+
+      - name: Upload encrypted dump
+        uses: actions/upload-artifact@v4
+        with:
+          name: mootoon-db-${{ github.run_number }}
+          path: mootoon.dump.gpg
+          retention-days: 90
+          if-no-files-found: error
