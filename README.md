@@ -101,6 +101,17 @@ npm run build --prefix frontend    # สร้างไฟล์ไว้ที�
 การล็อกอิน LINE ต้องเปิดผ่าน LIFF URL ที่ชี้มายัง HTTPS (เช่น tunnel) ตั้ง `WEBAPP_ENABLED=true`,
 `MINIAPP_DEVELOPING_LIFF_ID` และ `MINIAPP_DEVELOPING_CHANNEL_ID` ใน `.env`
 
+## Rich menu
+
+เมนู 2 หน้าใต้แชต ตั้งค่าใน `richmenu_config.py` รูปอยู่ที่ `richmenu/page1.jpg`, `richmenu/page2.jpg`
+deploy แยกจาก Render:
+
+1. เพิ่ม GitHub secret `LINE_CHANNEL_ACCESS_TOKEN` (ค่าเดียวกับใน Render)
+2. แท็บ Actions → **Deploy rich menu** → Run workflow (ค่าเริ่มต้นเป็น dry run; ติ๊กออกเพื่อ deploy จริง)
+
+ทดสอบในเครื่องโดยไม่เรียก LINE: `python richmenu_deploy.py --dry-run`
+สร้างรูปใหม่: `python richmenu/build_images.py <รูปต้นฉบับ.png>` (ต้องมี Pillow และ `npm ci --prefix frontend` เพื่อใช้ฟอนต์ Prompt)
+
 ## Deploy บน Render
 
 1. สร้าง GitHub repository และ push ไฟล์ทั้งหมด ยกเว้น `.env`

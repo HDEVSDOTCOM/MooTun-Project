@@ -1,6 +1,6 @@
 # MooTun Rich Menu (Phase 2B) — Design Spec
 
-**Status:** `DRAFT — awaiting owner review` (2026-11-01)
+**Status:** `APPROVED — implemented` (owner approved 2026-11-01)
 **Repository baseline:** `main` at `9d96246`
 **Decisions (owner, 2026-11-01):** 2B before 2A; mixed destinations (chat for
 summary/recent, Mini App for analysis/categories/settings); "เพิ่มเติม" switches to a

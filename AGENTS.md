@@ -8,6 +8,9 @@
 - Mini App frontend (`frontend/`, Vite + React + TS): `npm ci --prefix frontend`;
   `npm run dev --prefix frontend` (proxies `/api` to :8000); `npm test --prefix frontend` (Vitest);
   `npm run build --prefix frontend` (typecheck + build into gitignored `webapp/dist/`)
+- Rich menu: `python richmenu_deploy.py --dry-run` (validate + print);
+  real deploy runs from the "Deploy rich menu" GitHub Actions workflow.
+  Regenerate images: `python richmenu/build_images.py <owner-art.png>` (needs Pillow, dev-only)
 - No Python lint/formatter config; the frontend typechecks with `tsc --noEmit`
 
 ## Architecture
@@ -25,6 +28,12 @@ Mini App: `webapp_auth.py` verifies the LIFF ID token on every `/api/me/*` reque
 read-only APIs, the SPA shell for `/app/` and the tab paths in `SPA_TABS`, and hashed
 files from `webapp/dist/assets`. Pytest uses a stand-in dist (see the `web` fixture),
 so backend tests never need a frontend build.
+
+Rich menu (separate from the Render deploy): `richmenu_config.py` is pure data (areas,
+actions, aliases `mootoon-page1/2`); `richmenu_deploy.py` publishes it with the
+committed `richmenu/page*.jpg`. Message buttons must stay valid parser commands
+(`test_richmenu.py` enforces it). Page 2 labels are drawn by Pillow without raqm, so
+avoid stacked Thai marks such as "ตั้ง". The webhook ignores the menu's postbacks.
 
 Phase 1B stores at most one incomplete transaction per user in
 `pending_transactions`. `parser.parse_followup()` safety-checks each new message and

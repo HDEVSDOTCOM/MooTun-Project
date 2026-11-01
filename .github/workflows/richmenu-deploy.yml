@@ -1,0 +1,36 @@
+name: Deploy rich menu
+
+# Publishes richmenu_config.py + richmenu/page*.jpg to LINE.
+# Required repository secret: LINE_CHANNEL_ACCESS_TOKEN (not needed for dry run).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate and print only (no LINE API calls)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Deploy
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python richmenu_deploy.py --dry-run
+          else
+            python richmenu_deploy.py
+          fi
