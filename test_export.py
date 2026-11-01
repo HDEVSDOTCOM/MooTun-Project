@@ -17,7 +17,12 @@ import app as app_module
 import repository
 from database import configure_database, init_db
 from line_api import LineTransportError
-from messages import format_help_message
+from messages import (
+    format_delete_all_no_data,
+    format_export_no_data,
+    format_export_unavailable,
+    format_help_message,
+)
 from models import (
     Base,
     ExportToken,
@@ -264,7 +269,7 @@ def test_nonproduction_missing_base_is_unavailable_and_mints_nothing(tmp_path, m
         with Session(engine) as session:
             add_transaction(USER, "expense", "50", "อาหาร", session=session)
             reply = app_module.handle_text_message(USER, "ส่งออกข้อมูล", NOW, session)
-            assert reply == "ยังไม่สามารถส่งออกข้อมูลได้ในขณะนี้ครับ กรุณาลองใหม่ภายหลัง"
+            assert reply == format_export_unavailable()
             assert session.scalar(select(func.count(ExportToken.id))) == 0
     engine.dispose()
 
@@ -291,7 +296,7 @@ def test_empty_transaction_export_mints_nothing(export_client, state):
         assert _post_text(client, "goal", USER, "ตั้งเป้า 1500 ซื้อหนังสือ").status_code == 200
         assert _post_text(client, "delete-all", USER, "ลบข้อมูลทั้งหมด").status_code == 200
     assert _post_text(client, "export", USER, "ส่งออกข้อมูล").status_code == 200
-    assert replies[-1][1] == "ไม่มีข้อมูลสำหรับส่งออกครับ"
+    assert replies[-1][1] == format_export_no_data()
     with Session(engine) as session:
         assert session.scalar(select(func.count(Transaction.id))) == 0
         assert session.scalar(select(func.count(ExportToken.id))) == 0
@@ -475,7 +480,7 @@ def test_delete_all_gate_counts_only_live_tokens(export_client, expires_delta):
         with Session(engine) as session:
             assert session.scalar(select(func.count(ExportToken.id))) == 0
     else:
-        assert replies[-1][1] == "ไม่มีข้อมูลให้ลบครับ"
+        assert replies[-1][1] == format_delete_all_no_data()
         with Session(engine) as session:
             assert session.get(PendingAction, USER) is None
             assert session.scalar(select(func.count(ExportToken.id))) == 1
@@ -528,9 +533,9 @@ def test_export_preserves_every_pending_column(export_client, monkeypatch, actio
     if outcome == "success":
         assert client.get(_export_url(replies)).status_code == 200
     elif outcome == "empty":
-        assert replies[-1][1] == "ไม่มีข้อมูลสำหรับส่งออกครับ"
+        assert replies[-1][1] == format_export_no_data()
     else:
-        assert replies[-1][1] == "ยังไม่สามารถส่งออกข้อมูลได้ในขณะนี้ครับ กรุณาลองใหม่ภายหลัง"
+        assert replies[-1][1] == format_export_unavailable()
     with Session(engine) as session:
         assert _row_state(session.get(PendingTransaction, USER)) == before_draft
         action = session.get(PendingAction, USER)

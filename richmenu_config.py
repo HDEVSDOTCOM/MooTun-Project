@@ -31,8 +31,9 @@ def _message(label: str, text: str) -> dict:
     return {"type": "message", "label": label, "text": text}
 
 
-def _liff(label: str, tab: str) -> dict:
-    return {"type": "uri", "label": label, "uri": f"https://liff.line.me/{LIFF_ID}/{tab}"}
+def _liff(label: str, tab: str, query: str = "") -> dict:
+    uri = f"https://liff.line.me/{LIFF_ID}/{tab}" + (f"?{query}" if query else "")
+    return {"type": "uri", "label": label, "uri": uri}
 
 
 def _keyboard(label: str, data: str, fill_in: str | None = None) -> dict:
@@ -53,7 +54,8 @@ PAGES = {
         "WIDE": _switch("เพิ่มเติม", "page2"),
         "R1A": _message("สรุป", "สรุปเดือนนี้"),
         "R1B": _liff("วิเคราะห์", "analysis"),
-        "R2A": _liff("หมวด/งบ", "analysis"),
+        # Until budgets exist (Phase 2D), open analysis with the category card first.
+        "R2A": _liff("หมวด/งบ", "analysis", "section=categories"),
         "R2B": _message("รายการ", "รายการล่าสุด"),
         "R3A": _liff("ตั้งค่า", "settings"),
         "R3B": _message("Help", "ช่วยเหลือ"),

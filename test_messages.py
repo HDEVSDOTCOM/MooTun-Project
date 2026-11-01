@@ -12,6 +12,7 @@ from messages import (
     format_savings_goal,
     format_transaction_confirmation,
     format_unknown_message,
+    friendly_reason,
     limit_line_text,
 )
 
@@ -33,10 +34,9 @@ def test_confirmation_contains_clean_transaction_fields() -> None:
         }
     )
 
-    assert "บันทึกรายจ่ายแล้ว" in message
-    assert "จำนวน: 80 บาท" in message
-    assert "หมวด: อาหาร" in message
-    assert "วันที่: 14/09/2569" in message
+    assert "จดแล้ว! รายจ่าย 80 บาท" in message
+    assert "อาหาร" in message
+    assert "14 ก.ย. 69" in message
     assert "ข้าวกลางวัน โรงอาหาร" in message
 
 
@@ -51,11 +51,10 @@ def test_edit_confirmation_contains_clean_transaction_fields() -> None:
         }
     )
 
-    assert "แก้ไขรายรับล่าสุดแล้ว" in message
-    assert "จำนวน: 20,000 บาท" in message
-    assert "หมวด: เงินเดือน" in message
-    assert "วันที่: 14/09/2569" in message
-    assert "รายการ:" not in message
+    assert "แก้แล้ว! ตอนนี้เป็นรายรับ 20,000 บาท" in message
+    assert "เงินเดือน" in message
+    assert "14 ก.ย. 69" in message
+    assert "ไม่ระบุรายการ" not in message
 
 
 def test_delete_confirmation_prompt_identifies_exact_target() -> None:
@@ -69,11 +68,8 @@ def test_delete_confirmation_prompt_identifies_exact_target() -> None:
         }
     )
 
-    assert "ประเภท: รายจ่าย" in message
-    assert "รายการ: ข้าว" in message
-    assert "จำนวน: 60 บาท" in message
-    assert "หมวด: อาหาร" in message
-    assert "วันที่: 21/09/2569" in message
+    assert "รายจ่าย 60 บาท" in message
+    assert "ข้าว · อาหาร · 21 ก.ย. 69" in message
     assert 'พิมพ์ "ยืนยัน"' in message
 
 
@@ -83,8 +79,8 @@ def test_delete_all_prompt_states_scope_and_irreversibility() -> None:
     assert "ลบข้อมูลทั้งหมด" in message
     assert "รายการ 3 รายการ" in message
     assert "เป้าหมายการออม" in message
-    assert "ไม่สามารถย้อนกลับได้" in message
-    assert "บันทึกของระบบบางส่วนจะถูกคงไว้เพื่อป้องกันข้อผิดพลาด" in message
+    assert "เอาคืนไม่ได้" in message
+    assert "ระบบยังเก็บบันทึกการทำงานบางส่วนไว้ เพื่อป้องกันข้อผิดพลาด" in message
     assert "ชั่วคราว" not in message
     assert "ยืนยัน" in message
     assert "ยกเลิก" in message
@@ -92,7 +88,7 @@ def test_delete_all_prompt_states_scope_and_irreversibility() -> None:
 
 def test_delete_all_success_does_not_offer_undo() -> None:
     message = format_delete_all_success()
-    assert "ลบข้อมูลทั้งหมดเรียบร้อยแล้ว" in message
+    assert "ลบข้อมูลทั้งหมดแล้ว" in message
     assert "เลิกทำ" not in message
 
 
@@ -117,8 +113,8 @@ def test_recent_transactions_handles_empty_and_mixed_items() -> None:
     )
     assert "+500 บาท" in message
     assert "−42.5 บาท" in message
-    assert "14/09/2569" in message
-    assert "13/09/2569" in message
+    assert "14 ก.ย. 69" in message
+    assert "13 ก.ย. 69" in message
 
 
 def test_monthly_summary_calculates_balance_and_optional_categories() -> None:
@@ -131,11 +127,11 @@ def test_monthly_summary_calculates_balance_and_optional_categories() -> None:
             "top_categories": [{"category": "อาหาร", "amount": 900}],
         }
     )
-    assert "รายรับ: 3,000 บาท" in message
-    assert "รายจ่าย: 1,250 บาท" in message
-    assert "คงเหลือ: 1,750 บาท" in message
-    assert "ทั้งหมด: 12 รายการ" in message
-    assert "อาหาร: 900 บาท" in message
+    assert "รายรับ 3,000 บาท" in message
+    assert "รายจ่าย 1,250 บาท" in message
+    assert "เหลือ 1,750 บาท" in message
+    assert "จดไปแล้ว 12 รายการ" in message
+    assert "อาหาร 900 บาท" in message
 
 
 def test_savings_progress_is_bounded_and_handles_zero_target() -> None:
@@ -143,15 +139,16 @@ def test_savings_progress_is_bounded_and_handles_zero_target() -> None:
         {"name": "ซื้อหนังสือ", "target": 1000, "saved": 1200}
     )
     assert "100%" in complete
-    assert "สำเร็จตามเป้าหมายแล้ว" in complete
+    assert "ถึงเป้าแล้ว" in complete
 
     zero_target = format_savings_goal({"name": "ยังไม่กำหนด", "target": 0, "saved": 0})
-    assert "ความคืบหน้า: 0%" in zero_target
+    assert "(0%)" in zero_target
 
 
 def test_help_unknown_and_long_messages_are_safe() -> None:
     assert "ช่วยเหลือ" in format_unknown_message()
-    assert "กรุณาระบุจำนวนเงิน" in format_unknown_message("กรุณาระบุจำนวนเงิน")
+    assert "กรุณาระบุจำนวนเงิน" in format_unknown_message("กรุณาระบุจำนวนเงิน")  # unmapped reasons pass through
+    assert friendly_reason("กรุณาระบุจำนวนเงินที่ออม") in format_unknown_message("กรุณาระบุจำนวนเงินที่ออม")
     assert "จ่าย 50" in format_help_message()
     limited = limit_line_text("ก" * 6000)
     assert len(limited) == 4900

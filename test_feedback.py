@@ -14,6 +14,8 @@ import app as app_module
 from database import configure_database, init_db
 from line_api import LineTransportError
 from messages import (
+    format_delete_all_no_data,
+    format_export_no_data,
     format_feedback_comment_too_long,
     format_feedback_instruction,
     format_feedback_invalid_rating,
@@ -39,11 +41,12 @@ NOW = datetime(2026, 10, 9, 3, 0, tzinfo=timezone.utc)
 USER = "U-alice"
 BOB = "U-alice-other"
 INSTRUCTION = (
-    "หากต้องการส่งข้อเสนอแนะ กรุณาพิมพ์ 'เสนอแนะ [คะแนน 1-5]' "
-    "หรือ 'เสนอแนะ [คะแนน] [ข้อความ]' เช่น:\n- เสนอแนะ 5\n- เสนอแนะ 4 ใช้ง่ายดีครับ"
+    'อยากบอกอะไรหมูตุ๋น พิมพ์ "เสนอแนะ" ตามด้วยคะแนน 1-5 และข้อความ (ถ้ามี) เช่น\n'
+    "• เสนอแนะ 5\n"
+    "• เสนอแนะ 4 ใช้ง่ายดีครับ"
 )
-INVALID_RATING = "คะแนนข้อเสนอแนะต้องเป็นตัวเลข 1 ถึง 5 เท่านั้นครับ เช่น 'เสนอแนะ 5'"
-TOO_LONG = "ข้อความเสนอแนะยาวเกินไป (สูงสุด 1000 ตัวอักษร) กรุณาสรุปข้อความแล้วส่งใหม่อีกครั้งครับ"
+INVALID_RATING = 'คะแนนต้องเป็นเลข 1 ถึง 5 ครับ เช่น "เสนอแนะ 5"'
+TOO_LONG = "ข้อความยาวไปหน่อย ได้ไม่เกิน 1,000 ตัวอักษร ช่วยย่อแล้วส่งใหม่นะครับ"
 
 
 @pytest.fixture()
@@ -76,7 +79,7 @@ def feedback_client(tmp_path, monkeypatch):
 
 
 def _success(rating):
-    return f"บันทึกข้อเสนอแนะระดับ {rating} ดาวเรียบร้อย ขอบคุณที่ช่วยพัฒนาหมูตุ๋นครับ 🐷"
+    return f"ได้รับแล้ว {rating} ดาว ขอบคุณที่ช่วยให้หมูตุ๋นดีขึ้นครับ 🐷"
 
 
 def _count(session, model=UserFeedback, user=USER):
@@ -376,7 +379,7 @@ def test_feedback_only_delete_all_gate_cancel_and_exact_user_deletion(feedback_c
         assert session.get(PendingAction, USER) is None
         assert session.get(ProcessedWebhookEvent, "feedback-a") is not None
     assert _post_text(client, "empty-delete", USER, "ลบข้อมูลทั้งหมด").status_code == 200
-    assert replies[-1][1] == "ไม่มีข้อมูลให้ลบครับ"
+    assert replies[-1][1] == format_delete_all_no_data()
 
 
 @pytest.mark.parametrize("mismatch", ["user", "identity", "version", "type", "expiry"])
@@ -641,7 +644,7 @@ def test_feedback_does_not_touch_export_tokens_or_enter_csv(feedback_client):
     client, engine, replies = feedback_client
     assert _post_text(client, "only-feedback", USER, "เสนอแนะ 5 private-comment").status_code == 200
     assert _post_text(client, "empty-export", USER, "ส่งออกข้อมูล").status_code == 200
-    assert replies[-1][1] == "ไม่มีข้อมูลสำหรับส่งออกครับ"
+    assert replies[-1][1] == format_export_no_data()
     with Session(engine) as session:
         assert _count(session, ExportToken) == 0
     assert _post_text(client, "seed", USER, "ข้าว 50").status_code == 200

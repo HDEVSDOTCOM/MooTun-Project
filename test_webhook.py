@@ -12,6 +12,19 @@ from sqlalchemy.orm import Session
 import app as app_module
 from database import configure_database
 from line_api import LineTransportError
+from messages import (
+    UNKNOWN_HEADING,
+    format_delete_all_cancelled,
+    format_delete_all_expired,
+    format_delete_all_no_data,
+    format_delete_not_confirmed_yet,
+    format_pending_conflict,
+    format_pending_transaction_prompt,
+    format_undo_expired,
+    format_undo_id_collision,
+    format_undo_unavailable,
+    friendly_reason,
+)
 from models import (
     PendingAction,
     PendingTransaction,
@@ -263,9 +276,10 @@ def test_natural_language_entry_records_item_for_correct_user(webhook_client):
             ("U-alice", "expense", 5000, "อาหาร", "ข้าวมันไก่"),
             ("U-bob", "income", 2_000_000, "เงินเดือน", "เงินเดือน"),
         ]
-    assert "รายการ: ข้าวมันไก่" in replies[0][1]
-    assert "หมวด: อาหาร" in replies[0][1]
-    assert "รายการ: เงินเดือน" in replies[1][1]
+    assert "จดแล้ว! รายจ่าย 50 บาท" in replies[0][1]
+    assert "ข้าวมันไก่ · อาหาร" in replies[0][1]
+    assert "จดแล้ว! รายรับ 20,000 บาท" in replies[1][1]
+    assert "เงินเดือน · " in replies[1][1]
 
 
 def test_ambiguous_natural_language_does_not_write_transaction(webhook_client):
@@ -279,13 +293,13 @@ def test_ambiguous_natural_language_does_not_write_transaction(webhook_client):
     with Session(engine) as session:
         assert session.scalar(select(func.count(Transaction.id))) == 0
         assert session.get(PendingTransaction, "U-alice") is not None
-    assert replies[0][1] == "500 บาท เป็นรายรับหรือรายจ่ายครับ?"
+    assert replies[0][1] == format_pending_transaction_prompt(amount=500, description=None)
 
 
 def test_item_then_amount_completes_pending_transaction(webhook_client):
     client, engine, replies = webhook_client
     assert _post_text(client, "evt-item", "U-alice", "ข้าว").status_code == 200
-    assert replies[-1][1] == "ข้าว ราคาเท่าไหร่ครับ? เช่น 50"
+    assert replies[-1][1] == format_pending_transaction_prompt(amount=None, description="ข้าว")
 
     assert _post_text(client, "evt-amount", "U-alice", "50").status_code == 200
     with Session(engine) as session:
@@ -328,8 +342,8 @@ def test_edit_latest_replaces_only_saved_transaction(webhook_client):
         assert items[0].category == "อาหาร"
         assert items[0].description == "ข้าวมันไก่"
         assert items[0].occurred_on == original_date
-    assert "แก้ไขรายจ่ายล่าสุดแล้ว" in replies[-1][1]
-    assert "จำนวน: 120 บาท" in replies[-1][1]
+    assert "แก้แล้ว! ตอนนี้เป็นรายจ่าย 120 บาท" in replies[-1][1]
+    assert "ข้าวมันไก่ · อาหาร" in replies[-1][1]
 
 
 def test_edit_latest_without_saved_transaction_is_rejected(webhook_client):
@@ -340,7 +354,7 @@ def test_edit_latest_without_saved_transaction_is_rejected(webhook_client):
     with Session(engine) as session:
         assert session.scalar(select(func.count(Transaction.id))) == 0
         assert session.get(PendingTransaction, "U-alice") is None
-    assert replies[-1][1] == "ยังไม่มีรายการให้แก้ไข"
+    assert replies[-1][1] == "ยังไม่มีรายการให้แก้ครับ"
 
 
 def test_edit_latest_inherits_or_overrides_date(webhook_client):
@@ -387,7 +401,7 @@ def test_edit_latest_does_not_mutate_pending_draft(webhook_client):
         ) == original_pending
 
     assert _post_text(client, "evt-followup-after-edit", "U-alice", "50").status_code == 200
-    assert "รายการ: กาแฟ" in replies[-1][1]
+    assert "กาแฟ · " in replies[-1][1]
     with Session(engine) as session:
         items = list(session.scalars(select(Transaction).order_by(Transaction.id)))
         assert [(item.description, item.amount_satang) for item in items] == [
@@ -419,7 +433,7 @@ def test_incomplete_edit_preserves_saved_transaction_and_pending_draft(webhook_c
             client, f"evt-invalid-edit-{index}", "U-alice", text
         ).status_code == 200
         assert replies[-1][1].startswith(
-            "คำสั่งแก้ไขต้องระบุรายการและจำนวนเงินให้ครบในข้อความเดียวครับ"
+            friendly_reason("คำสั่งแก้ไขต้องระบุรายการและจำนวนเงินให้ครบในข้อความเดียวครับ")
         )
         with Session(engine) as session:
             saved = session.scalar(select(Transaction))
@@ -435,7 +449,7 @@ def test_incomplete_edit_preserves_saved_transaction_and_pending_draft(webhook_c
             ) == original_pending
 
     assert _post_text(client, "evt-followup-after-invalid", "U-alice", "50").status_code == 200
-    assert "รายการ: กาแฟ" in replies[-1][1]
+    assert "กาแฟ · " in replies[-1][1]
     with Session(engine) as session:
         items = list(session.scalars(select(Transaction).order_by(Transaction.id)))
         assert [(item.description, item.amount_satang) for item in items] == [
@@ -491,7 +505,7 @@ def test_active_delete_confirmation_cancel_preserves_pending_draft(webhook_clien
     client, engine, replies = webhook_client
     assert _post_text(client, "evt-delete-seed", "U-alice", "ข้าว 40").status_code == 200
     assert _post_text(client, "evt-delete-request", "U-alice", "ลบล่าสุด").status_code == 200
-    assert "ยืนยันลบรายการนี้หรือไม่" in replies[-1][1]
+    assert "ลบรายการนี้ไหมครับ" in replies[-1][1]
     assert _post_text(client, "evt-delete-draft", "U-alice", "กาแฟ").status_code == 200
     with Session(engine) as session:
         pending = session.get(PendingTransaction, "U-alice")
@@ -499,7 +513,7 @@ def test_active_delete_confirmation_cancel_preserves_pending_draft(webhook_clien
         pending_state = _row_state(pending)
 
     assert _post_text(client, "evt-delete-cancel", "U-alice", "ยกเลิก").status_code == 200
-    assert replies[-1][1] == "ยกเลิกการลบแล้ว"
+    assert replies[-1][1] == "โอเค ไม่ลบแล้วครับ"
     with Session(engine) as session:
         pending = session.get(PendingTransaction, "U-alice")
         assert pending is not None
@@ -536,7 +550,7 @@ def test_expired_delete_control_preserves_transaction_and_draft(
         control,
     ).status_code == 200
     assert replies[-1][1] == (
-        "คำสั่งลบหมดอายุแล้ว กรุณาส่ง 'ลบล่าสุด' อีกครั้งหากต้องการลบ"
+        app_module.PENDING_ACTION_EXPIRED_REPLY
     )
     with Session(engine) as session:
         pending = session.get(PendingTransaction, "U-alice")
@@ -553,7 +567,7 @@ def test_confirm_without_pending_action_preserves_unknown_behavior(webhook_clien
 
     assert _post_text(client, "evt-confirm-absent", "U-alice", "ยืนยัน").status_code == 200
 
-    assert replies[-1][1].startswith("ยังไม่เข้าใจข้อความนี้")
+    assert replies[-1][1].startswith(UNKNOWN_HEADING)
     with Session(engine) as session:
         assert session.scalar(select(func.count(Transaction.id))) == 0
 
@@ -581,7 +595,7 @@ def test_delete_confirmation_deletes_bound_target_only(webhook_client):
         newer_id = newer.id
 
     assert _post_text(client, "evt-bound-confirm", "U-alice", "ยืนยัน").status_code == 200
-    assert "ลบรายการเรียบร้อยแล้ว" in replies[-1][1]
+    assert "ลบแล้ว" in replies[-1][1]
     with Session(engine) as session:
         assert session.get(Transaction, bound_target_id) is None
         assert session.get(Transaction, newer_id) is not None
@@ -599,7 +613,7 @@ def test_delete_confirmation_is_user_isolated(webhook_client):
     assert _post_text(client, "evt-isolate-request", "U-alice", "ลบล่าสุด").status_code == 200
 
     assert _post_text(client, "evt-isolate-b-confirm", "U-bob", "ยืนยัน").status_code == 200
-    assert replies[-1][1].startswith("ยังไม่เข้าใจข้อความนี้")
+    assert replies[-1][1].startswith(UNKNOWN_HEADING)
     with Session(engine) as session:
         assert session.scalar(select(func.count(Transaction.id))) == 2
 
@@ -654,7 +668,7 @@ def test_repeated_delete_with_missing_only_target_leaves_no_action(webhook_clien
         session.commit()
 
     assert _post_text(client, "evt-empty-second", "U-alice", "ลบล่าสุด").status_code == 200
-    assert replies[-1][1] == "ยังไม่มีรายการให้ลบ"
+    assert replies[-1][1] == "ยังไม่มีรายการให้ลบครับ"
     with Session(engine) as session:
         assert session.get(PendingAction, "U-alice") is None
         assert session.scalar(select(func.count(Transaction.id))) == 0
@@ -743,7 +757,7 @@ def test_missing_delete_target_consumes_action_and_preserves_draft(webhook_clien
         session.commit()
 
     assert _post_text(client, "evt-missing-confirm", "U-alice", "ยืนยัน").status_code == 200
-    assert replies[-1][1] == "ไม่พบรายการที่ต้องการลบ (อาจถูกลบไปแล้ว)"
+    assert replies[-1][1] == "หารายการที่จะลบไม่เจอ อาจถูกลบไปแล้วครับ"
     with Session(engine) as session:
         pending = session.get(PendingTransaction, "U-alice")
         assert pending is not None
@@ -768,7 +782,7 @@ def test_pending_action_invalidation_occ_loser_is_cached(webhook_client, monkeyp
     )
     assert client.post("/webhook", content=body, headers=headers).status_code == 200
     loser_reply = replies[-1][1]
-    assert loser_reply == "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+    assert loser_reply == app_module.PENDING_ACTION_RETRY_REPLY
     assert calls == 1
 
     assert client.post("/webhook", content=body, headers=headers).status_code == 200
@@ -879,7 +893,7 @@ def test_pending_action_lazy_expiry_occ_loser_is_cached_and_not_reinterpreted(
 
     monkeypatch.setattr(app_module, "reply_text", fail_first_reply)
     assert _post_text(client, "evt-action-expiry-loser", "U-alice", control).status_code == 502
-    retry_reply = "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+    retry_reply = app_module.PENDING_ACTION_RETRY_REPLY
     assert attempts == [retry_reply]
 
     with Session(engine) as session:
@@ -953,7 +967,7 @@ def test_conflict_preserves_pending_state_until_valid_followup(webhook_client):
         original_state = (pending.version, pending.expires_at)
 
     assert _post_text(client, "evt-conflict", "U-alice", "รายรับ").status_code == 200
-    assert replies[-1][1].startswith("ข้อมูลนี้ขัดกับรายการที่ค้างไว้ครับ")
+    assert replies[-1][1].startswith(format_pending_conflict())
     with Session(engine) as session:
         pending = session.get(PendingTransaction, "U-alice")
         assert (pending.version, pending.expires_at) == original_state
@@ -1011,11 +1025,11 @@ def test_transaction_failure_rolls_back_pending_deletion_and_event_claim(
 def test_cancel_is_conditional_on_an_active_pending_draft(webhook_client):
     client, engine, replies = webhook_client
     assert _post_text(client, "evt-no-draft", "U-alice", "ยกเลิก").status_code == 200
-    assert "ข้อความนี้เป็นการปฏิเสธ" in replies[-1][1]
+    assert friendly_reason("ข้อความนี้เป็นการปฏิเสธ จึงยังไม่บันทึก") in replies[-1][1]
 
     assert _post_text(client, "evt-draft", "U-alice", "ข้าว").status_code == 200
     assert _post_text(client, "evt-cancel", "U-alice", "ยกเลิก").status_code == 200
-    assert replies[-1][1] == "ยกเลิกรายการที่ค้างไว้แล้วครับ"
+    assert replies[-1][1] == "โอเค ยกเลิกรายการที่ค้างไว้แล้วครับ"
     with Session(engine) as session:
         assert session.get(PendingTransaction, "U-alice") is None
 
@@ -1055,7 +1069,7 @@ def test_draft_expiring_between_read_and_mutation_is_not_completed(
     assert _post_text(client, "evt-expiry-draft", "U-alice", "ข้าว").status_code == 200
     assert _post_text(client, "evt-expiry-complete", "U-alice", "50").status_code == 200
     assert replies[-1][1] == (
-        "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+        app_module.PENDING_ACTION_RETRY_REPLY
     )
 
     with Session(engine) as session:
@@ -1139,7 +1153,7 @@ def test_lazy_expiry_occ_loser_does_not_reinterpret_against_replacement(
     monkeypatch.setattr(app_module, "reply_text", fail_first_reply)
 
     assert _post_text(client, "evt-expiry-loser", "U-alice", text).status_code == 502
-    retry_reply = "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+    retry_reply = app_module.PENDING_ACTION_RETRY_REPLY
     assert attempts == [retry_reply]
 
     with Session(engine) as session:
@@ -1190,7 +1204,7 @@ def test_followup_relative_date_uses_followup_event_time(webhook_client):
         "วันนี้ 50",
         timestamp=next_day,
     ).status_code == 200
-    assert replies[-1][1].startswith("ข้อมูลนี้ขัดกับรายการที่ค้างไว้ครับ")
+    assert replies[-1][1].startswith(format_pending_conflict())
 
     assert _post_text(
         client,
@@ -1223,7 +1237,7 @@ def test_explicit_pending_direction_survives_semantic_followup(webhook_client):
     client, engine, replies = webhook_client
     assert _post_text(client, "evt-explicit", "U-alice", "จ่าย").status_code == 200
     assert _post_text(client, "evt-semantic", "U-alice", "เงินเดือน").status_code == 200
-    assert replies[-1][1] == "เงินเดือน ราคาเท่าไหร่ครับ? เช่น 50"
+    assert replies[-1][1] == format_pending_transaction_prompt(amount=None, description="เงินเดือน")
     assert _post_text(client, "evt-amount", "U-alice", "50").status_code == 200
 
     with Session(engine) as session:
@@ -1249,7 +1263,7 @@ def test_occ_loser_reply_is_cached_and_not_reinterpreted(
     monkeypatch.setattr(app_module, "delete_pending_transaction", lose_delete)
     assert _post_text(client, "evt-loser", "U-alice", "50").status_code == 200
     loser_reply = replies[-1][1]
-    assert loser_reply == "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+    assert loser_reply == app_module.PENDING_ACTION_RETRY_REPLY
     assert calls == 1
 
     with Session(engine) as session:
@@ -1287,10 +1301,10 @@ def test_unsafe_rule_interactions_do_not_write_transactions(webhook_client):
     assert len(replies) == 10
 
 
-UNDO_EXPIRED_REPLY = "หมดเวลาย้อนกลับแล้วครับ รายการที่ลบไปแล้วไม่สามารถกู้คืนได้"
-UNDO_UNAVAILABLE_REPLY = "ไม่มีรายการให้ย้อนกลับครับ"
-DELETE_NOT_CONFIRMED_REPLY = "ยังไม่มีการลบให้ย้อนกลับ กรุณายืนยันการลบก่อน"
-UNDO_ID_COLLISION_REPLY = "ไม่สามารถย้อนกลับได้เนื่องจากมีข้อมูลอื่นทับซ้อน"
+UNDO_EXPIRED_REPLY = format_undo_expired()
+UNDO_UNAVAILABLE_REPLY = format_undo_unavailable()
+DELETE_NOT_CONFIRMED_REPLY = format_delete_not_confirmed_yet()
+UNDO_ID_COLLISION_REPLY = format_undo_id_collision()
 
 
 def _create_undo_snapshot(
@@ -1329,7 +1343,7 @@ def test_undo_restores_exact_original_transaction(webhook_client):
     original_id, original_created_at = _create_undo_snapshot(client, engine)
 
     assert _post_text(client, "evt-undo-apply", "U-alice", "เลิกทำ").status_code == 200
-    assert replies[-1][1].startswith("↩️ กู้คืนรายการเรียบร้อยแล้ว")
+    assert replies[-1][1].startswith("↩️ เอาคืนมาแล้ว")
     with Session(engine) as session:
         items = list(session.scalars(select(Transaction)))
         assert len(items) == 1
@@ -1393,7 +1407,7 @@ def test_cancel_with_active_undo_preserves_undo_and_cancels_draft(webhook_client
         undo_state = _row_state(session.get(PendingAction, "U-alice"))
 
     assert _post_text(client, "evt-undo-cancel", "U-alice", "ยกเลิก").status_code == 200
-    assert replies[-1][1] == "ยกเลิกรายการที่ค้างไว้แล้วครับ"
+    assert replies[-1][1] == "โอเค ยกเลิกรายการที่ค้างไว้แล้วครับ"
     with Session(engine) as session:
         action = session.get(PendingAction, "U-alice")
         assert action is not None
@@ -1409,7 +1423,7 @@ def test_confirm_with_active_undo_preserves_undo_without_deleting(webhook_client
         undo_state = _row_state(session.get(PendingAction, "U-alice"))
 
     assert _post_text(client, "evt-undo-confirm-again", "U-alice", "ยืนยัน").status_code == 200
-    assert replies[-1][1].startswith("ยังไม่เข้าใจข้อความนี้")
+    assert replies[-1][1].startswith(UNKNOWN_HEADING)
     with Session(engine) as session:
         action = session.get(PendingAction, "U-alice")
         assert action is not None
@@ -1461,7 +1475,7 @@ def test_delete_latest_without_transactions_preserves_active_undo(webhook_client
         undo_state = _row_state(session.get(PendingAction, "U-alice"))
 
     assert _post_text(client, "evt-undo-empty-delete", "U-alice", "ลบล่าสุด").status_code == 200
-    assert replies[-1][1] == "ยังไม่มีรายการให้ลบ"
+    assert replies[-1][1] == "ยังไม่มีรายการให้ลบครับ"
     with Session(engine) as session:
         action = session.get(PendingAction, "U-alice")
         assert action is not None
@@ -1497,7 +1511,7 @@ def test_delete_latest_confirm_at_active_undo_is_rejected(webhook_client):
     assert _post_text(client, "evt-undo-cannot-confirm", "U-alice", "เลิกทำ").status_code == 200
     assert replies[-1][1].startswith("↩️")
     assert _post_text(client, "evt-undo-confirm-after", "U-alice", "ยืนยัน").status_code == 200
-    assert replies[-1][1].startswith("ยังไม่เข้าใจข้อความนี้")
+    assert replies[-1][1].startswith(UNKNOWN_HEADING)
 
 
 def test_active_confirm_delete_rejects_undo_until_confirmed(webhook_client):
@@ -1545,7 +1559,7 @@ def test_expired_undo_cancel_falls_through_to_draft_cancellation(webhook_client)
 
     assert _post_text(client, "evt-expired-undo-cancel", "U-alice", "ยกเลิก").status_code == 200
     assert replies[-1][1] != UNDO_EXPIRED_REPLY
-    assert replies[-1][1] == "ยกเลิกรายการที่ค้างไว้แล้วครับ"
+    assert replies[-1][1] == "โอเค ยกเลิกรายการที่ค้างไว้แล้วครับ"
     with Session(engine) as session:
         assert session.get(PendingAction, "U-alice") is None
         assert session.get(PendingTransaction, "U-alice") is None
@@ -1557,7 +1571,7 @@ def test_expired_undo_confirm_is_not_reinterpreted(webhook_client):
     _expire_pending_action(engine)
 
     assert _post_text(client, "evt-expired-undo-confirm", "U-alice", "ยืนยัน").status_code == 200
-    assert replies[-1][1].startswith("ยังไม่เข้าใจข้อความนี้")
+    assert replies[-1][1].startswith(UNKNOWN_HEADING)
     with Session(engine) as session:
         assert session.scalar(select(func.count(Transaction.id))) == 0
 
@@ -1606,7 +1620,7 @@ def test_undo_occ_loser_is_cached_and_not_reinterpreted(webhook_client, monkeypa
         {"events": [_text_event("evt-undo-occ", "U-alice", "เลิกทำ")]}
     )
     assert client.post("/webhook", content=body, headers=headers).status_code == 200
-    retry_reply = "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+    retry_reply = app_module.PENDING_ACTION_RETRY_REPLY
     assert replies[-1][1] == retry_reply
     assert calls == 1
 
@@ -1621,16 +1635,13 @@ def test_undo_occ_loser_is_cached_and_not_reinterpreted(webhook_client, monkeypa
         assert event.response_text == retry_reply
 
 
-DELETE_ALL_EXPIRED_REPLY = (
-    "คำสั่งลบข้อมูลทั้งหมดหมดอายุแล้ว "
-    "กรุณาส่ง 'ลบข้อมูลทั้งหมด' อีกครั้งหากต้องการลบ"
-)
+DELETE_ALL_EXPIRED_REPLY = format_delete_all_expired()
 
 
 def test_delete_all_without_data_is_rejected(webhook_client):
     client, engine, replies = webhook_client
     assert _post_text(client, "evt-da-empty", "U-alice", "ลบข้อมูลทั้งหมด").status_code == 200
-    assert replies[-1][1] == "ไม่มีข้อมูลให้ลบครับ"
+    assert replies[-1][1] == format_delete_all_no_data()
     with Session(engine) as session:
         assert session.get(PendingAction, "U-alice") is None
 
@@ -1645,7 +1656,7 @@ def test_delete_all_wipes_only_user_and_keeps_webhook_events(webhook_client):
     assert _post_text(client, "evt-da-b2", "U-bob", "ตั้งเป้า 9000 โทรศัพท์").status_code == 200
 
     assert _post_text(client, "evt-da-request", "U-alice", "ลบข้อมูลทั้งหมด").status_code == 200
-    assert replies[-1][1].startswith("คุณกำลังจะลบข้อมูลทั้งหมด")
+    assert replies[-1][1].startswith("⚠️ จะลบข้อมูลทั้งหมดจริงไหมครับ?")
     assert "รายการ 2 รายการ" in replies[-1][1]
     with Session(engine) as session:
         action = session.get(PendingAction, "U-alice")
@@ -1662,7 +1673,7 @@ def test_delete_all_wipes_only_user_and_keeps_webhook_events(webhook_client):
         )
 
     assert _post_text(client, "evt-da-confirm", "U-alice", "ยืนยัน").status_code == 200
-    assert replies[-1][1].startswith("🗑️ ลบข้อมูลทั้งหมดเรียบร้อยแล้ว")
+    assert replies[-1][1].startswith("🗑️ ลบข้อมูลทั้งหมดแล้ว")
     with Session(engine) as session:
         assert (
             session.scalar(
@@ -1743,13 +1754,13 @@ def test_delete_all_cancel_preserves_draft_and_financial_data(webhook_client):
     assert _post_text(client, "evt-da-cancel-seed", "U-alice", "ข้าว 40").status_code == 200
     assert _post_text(client, "evt-da-cancel-draft", "U-alice", "กาแฟ").status_code == 200
     assert _post_text(client, "evt-da-cancel-request", "U-alice", "ลบข้อมูลทั้งหมด").status_code == 200
-    assert replies[-1][1].startswith("คุณกำลังจะลบข้อมูลทั้งหมด")
+    assert replies[-1][1].startswith("⚠️ จะลบข้อมูลทั้งหมดจริงไหมครับ?")
     with Session(engine) as session:
         pending = session.get(PendingTransaction, "U-alice")
         pending_state = _row_state(pending)
 
     assert _post_text(client, "evt-da-cancel", "U-alice", "ยกเลิก").status_code == 200
-    assert replies[-1][1] == "ยกเลิกการลบข้อมูลทั้งหมดแล้ว"
+    assert replies[-1][1] == format_delete_all_cancelled()
     with Session(engine) as session:
         assert session.get(PendingAction, "U-alice") is None
         pending = session.get(PendingTransaction, "U-alice")
@@ -1772,7 +1783,7 @@ def test_delete_all_overrides_active_undo(webhook_client):
         assert session.get(PendingAction, "U-alice").action_type == "undo_delete"
 
     assert _post_text(client, "evt-da-override-undo", "U-alice", "ลบข้อมูลทั้งหมด").status_code == 200
-    assert replies[-1][1].startswith("คุณกำลังจะลบข้อมูลทั้งหมด")
+    assert replies[-1][1].startswith("⚠️ จะลบข้อมูลทั้งหมดจริงไหมครับ?")
     with Session(engine) as session:
         action = session.get(PendingAction, "U-alice")
         assert action.action_type == "confirm_delete_all"
@@ -1781,7 +1792,7 @@ def test_delete_all_overrides_active_undo(webhook_client):
         assert session.scalar(select(func.count(Transaction.id))) == 0
 
     assert _post_text(client, "evt-da-override-confirm", "U-alice", "ยืนยัน").status_code == 200
-    assert replies[-1][1].startswith("🗑️ ลบข้อมูลทั้งหมดเรียบร้อยแล้ว")
+    assert replies[-1][1].startswith("🗑️ ลบข้อมูลทั้งหมดแล้ว")
     with Session(engine) as session:
         assert session.get(PendingAction, "U-alice") is None
         assert session.scalar(select(func.count(Transaction.id))) == 0
@@ -1819,7 +1830,7 @@ def test_goal_mutation_invalidates_delete_all(webhook_client):
     assert _post_text(
         client, "evt-da-goalinv-set", "U-alice", "ตั้งเป้า 1500 ซื้อหนังสือ"
     ).status_code == 200
-    assert replies[-1][1].startswith("ตั้งเป้าหมายเรียบร้อยแล้ว")
+    assert replies[-1][1].startswith("ตั้งเป้าเรียบร้อย")
     with Session(engine) as session:
         assert session.get(PendingAction, "U-alice") is None
         assert (
@@ -1903,7 +1914,7 @@ def test_delete_all_occ_loser_reply_is_cached(webhook_client, monkeypatch):
         {"events": [_text_event("evt-da-occ-confirm", "U-alice", "ยืนยัน")]}
     )
     assert client.post("/webhook", content=body, headers=headers).status_code == 200
-    retry_reply = "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+    retry_reply = app_module.PENDING_ACTION_RETRY_REPLY
     assert replies[-1][1] == retry_reply
     assert calls == 1
 

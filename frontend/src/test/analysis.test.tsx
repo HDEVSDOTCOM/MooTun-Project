@@ -1,4 +1,6 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render as renderDom, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CategoryTotals, MonthlySeries } from "../api";
 
@@ -38,6 +40,10 @@ vi.mock("../session", () => ({
 
 const charts = await import("../charts");
 const { Analysis } = await import("../routes/Analysis");
+
+function render(ui: ReactElement, path = "/analysis") {
+  return renderDom(<MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>);
+}
 
 afterEach(() => {
   cleanup();
@@ -81,6 +87,16 @@ describe("Analysis", () => {
     expect(screen.getByText("฿0.01")).toBeTruthy();
     expect(screen.getByText("<i>ของใช้</i>")).toBeTruthy();
     expect(screen.getByText("฿6.00")).toBeTruthy();
+  });
+
+  it("puts the category card first for the rich menu's หมวด/งบ link", () => {
+    render(<Analysis />);
+    let titles = screen.getAllByRole("heading").map((node) => node.textContent);
+    expect(titles.indexOf("ประวัติรายรับรายจ่าย")).toBeLessThan(titles.indexOf("รายจ่ายตามหมวด"));
+    cleanup();
+    render(<Analysis />, "/analysis?section=categories");
+    titles = screen.getAllByRole("heading").map((node) => node.textContent);
+    expect(titles.indexOf("รายจ่ายตามหมวด")).toBeLessThan(titles.indexOf("ประวัติรายรับรายจ่าย"));
   });
 
   it("shows an empty state instead of a flat chart", () => {
