@@ -42,6 +42,9 @@ from messages import (
     format_feedback_success,
     format_help_message,
     format_monthly_summary,
+    format_no_savings_goal,
+    format_savings_added,
+    format_savings_goal_created,
     format_onboarding_usage,
     format_onboarding_welcome,
     format_invalid_followup,
@@ -117,8 +120,8 @@ from webapp_routes import register_webapp
 
 logger = logging.getLogger("mootoon")
 BANGKOK = ZoneInfo("Asia/Bangkok")
-PENDING_ACTION_RETRY_REPLY = "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
-PENDING_ACTION_EXPIRED_REPLY = "คำสั่งลบหมดอายุแล้ว กรุณาส่ง 'ลบล่าสุด' อีกครั้งหากต้องการลบ"
+PENDING_ACTION_RETRY_REPLY = "มีอีกข้อความแก้รายการนี้ไปพร้อมกัน ลองส่งใหม่อีกครั้งนะครับ"
+PENDING_ACTION_EXPIRED_REPLY = 'คำสั่งลบหมดเวลาแล้ว ถ้ายังอยากลบ พิมพ์ "ลบล่าสุด" อีกครั้งครับ'
 
 load_dotenv()
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
@@ -305,7 +308,7 @@ def handle_text_message(
             except PendingActionConflictError:
                 return PENDING_ACTION_RETRY_REPLY
             if item is None:
-                return "ไม่พบรายการที่ต้องการลบ (อาจถูกลบไปแล้ว)"
+                return "หารายการที่จะลบไม่เจอ อาจถูกลบไปแล้วครับ"
             return format_delete_success(_transaction_data(item))
         if normalized_text == "ยกเลิก":
             if not delete_pending_action(
@@ -316,7 +319,7 @@ def handle_text_message(
                 session=session,
             ):
                 return PENDING_ACTION_RETRY_REPLY
-            return "ยกเลิกการลบแล้ว"
+            return "โอเค ไม่ลบแล้วครับ"
         if normalized_text == "เลิกทำ":
             return format_delete_not_confirmed_yet()
 
@@ -375,7 +378,7 @@ def handle_text_message(
             session=session,
         )
     except PendingTransactionConflictError:
-        return "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+        return PENDING_ACTION_RETRY_REPLY
     if pending is not None and normalized_text == "ยกเลิก":
         if not delete_pending_transaction(
             line_user_id,
@@ -384,8 +387,8 @@ def handle_text_message(
             now=_utc_now(),
             session=session,
         ):
-            return "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
-        return "ยกเลิกรายการที่ค้างไว้แล้วครับ"
+            return PENDING_ACTION_RETRY_REPLY
+        return "โอเค ยกเลิกรายการที่ค้างไว้แล้วครับ"
 
     command = parse_command(text, now=event_time)
 
@@ -444,7 +447,7 @@ def handle_text_message(
             session=session,
         )
         if item is None:
-            return "ยังไม่มีรายการให้แก้ไข"
+            return "ยังไม่มีรายการให้แก้ครับ"
         return format_edit_confirmation(_transaction_data(item))
 
     if pending is not None and isinstance(command, TransactionCommand):
@@ -465,7 +468,7 @@ def handle_text_message(
             now=_utc_now(),
             session=session,
         ):
-            return "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+            return PENDING_ACTION_RETRY_REPLY
 
     if pending is not None and isinstance(
         command,
@@ -498,7 +501,7 @@ def handle_text_message(
                 now=_utc_now(),
                 session=session,
             ):
-                return "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+                return PENDING_ACTION_RETRY_REPLY
             command = followup
         elif isinstance(followup, IncompleteCommand):
             if not update_pending_transaction(
@@ -513,7 +516,7 @@ def handle_text_message(
                 now=_utc_now(),
                 session=session,
             ):
-                return "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+                return PENDING_ACTION_RETRY_REPLY
             return format_pending_transaction_prompt(
                 amount=followup.amount,
                 description=followup.description,
@@ -535,7 +538,7 @@ def handle_text_message(
             now=processing_time,
             session=session,
         ):
-            return "รายการที่ค้างอยู่มีการเปลี่ยนแปลงแล้วครับ กรุณาลองส่งอีกครั้ง"
+            return PENDING_ACTION_RETRY_REPLY
         return format_pending_transaction_prompt(
             amount=command.amount,
             description=command.description,
@@ -576,7 +579,7 @@ def handle_text_message(
             command.amount,
             session=session,
         )
-        return "ตั้งเป้าหมายเรียบร้อยแล้ว\n" + format_savings_goal(_goal_data(goal))
+        return format_savings_goal_created(_goal_data(goal))
 
     if isinstance(command, SavingsProgressCommand):
         if pending_delete_all is not None and not invalidate_pending_action(
@@ -594,8 +597,8 @@ def handle_text_message(
                 session=session,
             )
         except LookupError:
-            return "ยังไม่มีเป้าหมายการออม ลองพิมพ์ “ตั้งเป้า 1500 ซื้อหนังสือ”"
-        return "บันทึกเงินออมเรียบร้อยแล้ว\n" + format_savings_goal(_goal_data(goal))
+            return format_no_savings_goal()
+        return format_savings_added(_goal_data(goal))
 
     if isinstance(command, UnresolvedCommand):
         if command.kind == CommandKind.AMBIGUOUS:
@@ -640,7 +643,7 @@ def handle_text_message(
         item = get_latest_transaction(line_user_id, session=session)
         if action is not None and action.action_type == "undo_delete":
             if item is None:
-                return "ยังไม่มีรายการให้ลบ"
+                return "ยังไม่มีรายการให้ลบครับ"
             if not replace_pending_action_with_confirm(
                 line_user_id,
                 action.version,
@@ -661,7 +664,7 @@ def handle_text_message(
         ):
             return PENDING_ACTION_RETRY_REPLY
         if item is None:
-            return "ยังไม่มีรายการให้ลบ"
+            return "ยังไม่มีรายการให้ลบครับ"
         if not create_pending_action(
             line_user_id,
             action_type="confirm_delete",
@@ -686,7 +689,7 @@ def handle_text_message(
     if command.kind == CommandKind.SAVINGS_STATUS:
         goal = get_savings_goal(line_user_id, session=session)
         if goal is None:
-            return "ยังไม่มีเป้าหมายการออม ลองพิมพ์ “ตั้งเป้า 1500 ซื้อหนังสือ”"
+            return format_no_savings_goal()
         return format_savings_goal(_goal_data(goal))
 
     return format_unknown_message()

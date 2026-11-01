@@ -81,14 +81,14 @@ def test_compose_button_opens_empty_keyboard():
 
 
 def test_uri_buttons_target_our_liff_tabs():
-    pattern = re.compile(rf"https://liff\.line\.me/{re.escape(config.LIFF_ID)}/([a-z]+)")
+    pattern = re.compile(rf"https://liff\.line\.me/{re.escape(config.LIFF_ID)}/([a-z]+)(?:\?section=categories)?")
     uris = [a for areas in config.PAGES.values() for a in areas.values() if a["type"] == "uri"]
     assert uris
     for action in uris:
         match = pattern.fullmatch(action["uri"])
         assert match and match.group(1) in SPA_TABS
     assert _action("page1", "R1B")["uri"].endswith("/analysis")
-    assert _action("page1", "R2A")["uri"].endswith("/analysis")
+    assert _action("page1", "R2A")["uri"].endswith("/analysis?section=categories")
     assert _action("page1", "R3A")["uri"].endswith("/settings")
 
 

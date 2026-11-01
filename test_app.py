@@ -37,18 +37,18 @@ def test_monthly_summary_and_delete_follow_chat_commands(db_session):
     handle_text_message("U-test", "จ่าย 120.50 อาหาร", moment, db_session)
 
     summary_reply = handle_text_message("U-test", "สรุปเดือนนี้", moment, db_session)
-    assert "เดือน 9/2569" in summary_reply
-    assert "รายรับ: 1,000 บาท" in summary_reply
-    assert "รายจ่าย: 120.5 บาท" in summary_reply
-    assert "คงเหลือ: 879.5 บาท" in summary_reply
+    assert "สรุปเดือนกันยายน 2569" in summary_reply
+    assert "รายรับ 1,000 บาท" in summary_reply
+    assert "รายจ่าย 120.5 บาท" in summary_reply
+    assert "เหลือ 879.5 บาท" in summary_reply
 
     delete_reply = handle_text_message("U-test", "ลบล่าสุด", moment, db_session)
-    assert "ยืนยันลบรายการนี้หรือไม่" in delete_reply
-    assert "14/09/2569" in delete_reply
+    assert "ลบรายการนี้ไหมครับ" in delete_reply
+    assert "14 ก.ย. 69" in delete_reply
     assert monthly_summary("U-test", 2026, 9, session=db_session)["expense"] == 120.5
 
     confirmed_reply = handle_text_message("U-test", "ยืนยัน", moment, db_session)
-    assert "ลบรายการเรียบร้อยแล้ว" in confirmed_reply
+    assert "ลบแล้ว" in confirmed_reply
     summary = monthly_summary("U-test", 2026, 9, session=db_session)
     assert summary["expense"] == 0
 
@@ -56,14 +56,14 @@ def test_monthly_summary_and_delete_follow_chat_commands(db_session):
 def test_savings_goal_flow(db_session):
     moment = datetime(2026, 9, 14, 3, 0, tzinfo=timezone.utc)
 
-    assert "ตั้งเป้าหมายเรียบร้อยแล้ว" in handle_text_message(
+    assert "ตั้งเป้าเรียบร้อย" in handle_text_message(
         "U-test", "ตั้งเป้า 1500 ซื้อหนังสือ", moment, db_session
     )
-    assert "บันทึกเงินออมเรียบร้อยแล้ว" in handle_text_message(
+    assert "เก็บเพิ่มแล้ว" in handle_text_message(
         "U-test", "ออม 100", moment, db_session
     )
     status = handle_text_message("U-test", "เป้าหมาย", moment, db_session)
-    assert "100 / 1,500 บาท" in status
+    assert "ออมแล้ว 100 จาก 1,500 บาท" in status
 
 
 def test_delete_all_requires_confirmation_and_wipes_user(db_session):
@@ -72,12 +72,12 @@ def test_delete_all_requires_confirmation_and_wipes_user(db_session):
     handle_text_message("U-test", "จ่าย 120.50 อาหาร", moment, db_session)
 
     prompt = handle_text_message("U-test", "ลบข้อมูลทั้งหมด", moment, db_session)
-    assert "ลบข้อมูลทั้งหมด" in prompt
+    assert "ลบข้อมูลทั้งหมดจริงไหม" in prompt
     assert "รายการ 2 รายการ" in prompt
     assert monthly_summary("U-test", 2026, 9, session=db_session)["transaction_count"] == 2
 
     confirmed = handle_text_message("U-test", "ยืนยัน", moment, db_session)
-    assert "ลบข้อมูลทั้งหมดเรียบร้อยแล้ว" in confirmed
+    assert "ลบข้อมูลทั้งหมดแล้ว" in confirmed
     assert monthly_summary("U-test", 2026, 9, session=db_session)["transaction_count"] == 0
 
 
@@ -86,4 +86,4 @@ def test_delete_all_without_data_is_rejected(db_session):
 
     reply = handle_text_message("U-empty", "ลบข้อมูลทั้งหมด", moment, db_session)
 
-    assert reply == "ไม่มีข้อมูลให้ลบครับ"
+    assert reply == "ยังไม่มีข้อมูลให้ลบครับ"

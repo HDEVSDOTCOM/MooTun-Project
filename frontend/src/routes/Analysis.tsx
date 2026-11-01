@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Bar, Doughnut } from "react-chartjs-2";
+import { useSearchParams } from "react-router-dom";
 import type { CategoryTotals, MonthlySeries } from "../api";
 import { barData, barTooltip, categoryColor, COLORS, donutData, donutTooltip } from "../charts";
 import { MonthPicker } from "../components/MonthPicker";
@@ -35,10 +36,12 @@ function Segmented<T extends string>({ label, value, options, onChange }: {
 }
 
 export function Analysis() {
+  // The rich menu's หมวด/งบ button opens ?section=categories: categories come first.
+  const [params] = useSearchParams();
+  const categoriesFirst = params.get("section") === "categories";
   return (
     <div className="space-y-4">
-      <MonthlyHistory />
-      <CategoryBreakdown />
+      {categoriesFirst ? <><CategoryBreakdown /><MonthlyHistory /></> : <><MonthlyHistory /><CategoryBreakdown /></>}
     </div>
   );
 }

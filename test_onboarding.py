@@ -15,6 +15,8 @@ import parser as parser_module
 from database import configure_database
 from line_api import LINE_TEXT_LIMIT, LineTransportError
 from messages import (
+    format_delete_all_no_data,
+    format_export_no_data,
     format_help_message,
     format_onboarding_usage,
     format_onboarding_welcome,
@@ -54,17 +56,17 @@ NOW = datetime(2026, 10, 9, 3, 0, tzinfo=timezone.utc)
 USER = "U-alice"
 BOB = "U-alice-other"
 WELCOME = (
-    "🐷 สวัสดีครับ หมูตุ๋นช่วยจดรายรับ รายจ่าย และเงินออมผ่านแชตครับ\n\n"
-    "เริ่มได้เลย เช่น\n"
+    "🐷 สวัสดีครับ หมูตุ๋นช่วยจดรายรับรายจ่ายและเงินออมให้ แค่พิมพ์ในแชต\n\n"
+    "ลองเลย เช่น\n"
     "• ข้าว 50\n"
     "• เงินเดือน 20000\n"
     "• สรุปเดือนนี้\n\n"
-    "ดูคำสั่งเพิ่มเติม: ช่วยเหลือ\n"
-    "ดูข้อความเริ่มต้นนี้อีกครั้ง: เริ่มใช้งาน\n"
-    "ส่งข้อเสนอแนะ: เสนอแนะ 5 ใช้ง่ายดีครับ\n\n"
-    "ข้อมูลของคุณแยกตาม LINE user ID และลบข้อมูลของคุณได้ด้วย `ลบข้อมูลทั้งหมด` ครับ"
+    'ดูคำสั่งทั้งหมด: "ช่วยเหลือ"\n'
+    'ดูข้อความนี้อีกครั้ง: "เริ่มใช้งาน"\n'
+    'บอกความเห็น: "เสนอแนะ 5 ใช้ง่ายดี"\n\n'
+    'ข้อมูลของคุณแยกตามบัญชี LINE และลบทั้งหมดได้ทุกเมื่อด้วย "ลบข้อมูลทั้งหมด"'
 )
-USAGE = "คำสั่งเริ่มใช้งานไม่ต้องใส่ข้อมูลเพิ่มเติมครับ พิมพ์ 'เริ่มใช้งาน' ได้เลย"
+USAGE = 'พิมพ์แค่ "เริ่มใช้งาน" คำเดียวพอครับ ไม่ต้องใส่อะไรต่อท้าย'
 VALID_INPUTS = ["เริ่มใช้งาน", " เริ่มใช้งาน ", "เริ่มใช้งาน    ", "\t\nเริ่มใช้งาน\r\n\t"]
 MALFORMED_INPUTS = [
     "เริ่มใช้งาน 100", "เริ่มใช้งาน abc", "เริ่มใช้งาน เพิ่มเติม",
@@ -225,7 +227,7 @@ def test_near_miss_uses_normal_routing_not_welcome_or_usage(onboarding_client, t
     client, engine, replies = onboarding_client
     assert _post_text(client, "near-miss", USER, text).status_code == 200
     assert replies[-1][1] not in (WELCOME, USAGE)
-    assert "พิมพ์ “ช่วยเหลือ”" in replies[-1][1]
+    assert 'พิมพ์ "ช่วยเหลือ"' in replies[-1][1]
 
 
 @pytest.mark.parametrize("trigger", ["follow", "เริ่มใช้งาน", "เริ่มใช้งาน 100", "เริ่มใช้งาน abc", "เริ่มใช้งาน เพิ่มเติม"])
@@ -502,7 +504,7 @@ def test_first_transaction_is_never_replaced_or_decorated_by_welcome(onboarding_
         assert _post_event(client, _follow_event("follow")).status_code == 200
     assert _post_text(client, "transaction", USER, "ข้าว 50").status_code == 200
     transaction_reply = replies[-1][1]
-    assert transaction_reply.startswith("✅ บันทึกรายจ่ายแล้ว")
+    assert transaction_reply.startswith("✅ จดแล้ว! รายจ่าย")
     assert WELCOME not in transaction_reply and "สวัสดีครับ" not in transaction_reply
     if not follow_first:
         assert len(replies) == 1
@@ -534,9 +536,9 @@ def test_welcome_only_user_has_no_delete_all_or_export_data(onboarding_client, t
     with Session(engine) as session:
         assert not get_user_data_summary(USER, now=NOW, session=session).has_any_data
     assert _post_text(client, "delete-all", USER, "ลบข้อมูลทั้งหมด").status_code == 200
-    assert replies[-1][1] == "ไม่มีข้อมูลให้ลบครับ"
+    assert replies[-1][1] == format_delete_all_no_data()
     assert _post_text(client, "export", USER, "ส่งออกข้อมูล").status_code == 200
-    assert replies[-1][1] == "ไม่มีข้อมูลสำหรับส่งออกครับ"
+    assert replies[-1][1] == format_export_no_data()
     assert not any(_business_state(engine).values())
 
 
@@ -544,7 +546,7 @@ def test_feedback_csv_and_confirmed_delete_all_survive_onboarding(onboarding_cli
     client, engine, replies = onboarding_client
     assert _post_text(client, "seed", USER, "ข้าว 50").status_code == 200
     assert _post_text(client, "feedback", USER, "เสนอแนะ 4 ดี   มาก").status_code == 200
-    assert replies[-1][1].startswith("บันทึกข้อเสนอแนะระดับ 4 ดาว")
+    assert replies[-1][1].startswith("ได้รับแล้ว 4 ดาว")
     assert _post_text(client, "export", USER, "ส่งออกข้อมูล").status_code == 200
     url = replies[-1][1].splitlines()[-1]
     csv_before = client.get(url).content
@@ -559,7 +561,7 @@ def test_feedback_csv_and_confirmed_delete_all_survive_onboarding(onboarding_cli
     assert _post_text(client, "replay", USER, "เริ่มใช้งาน").status_code == 200
     assert _business_state(engine) == before_confirmation
     assert _post_text(client, "confirm", USER, "ยืนยัน").status_code == 200
-    assert replies[-1][1].startswith("🗑️ ลบข้อมูลทั้งหมดเรียบร้อยแล้ว")
+    assert replies[-1][1].startswith("🗑️ ลบข้อมูลทั้งหมดแล้ว")
     assert replies[-1][1] != WELCOME
     assert not any(_business_state(engine).values())
     assert client.get(url).status_code == 404
@@ -591,6 +593,6 @@ def test_help_exposes_only_minimal_onboarding_and_feedback_entries(onboarding_cl
     client, engine, replies = onboarding_client
     assert _post_text(client, "help", USER, "ช่วยเหลือ").status_code == 200
     assert replies[-1][1] == format_help_message()
-    assert "ดูข้อความเริ่มต้น: เริ่มใช้งาน" in replies[-1][1]
-    assert "ส่งข้อเสนอแนะ: เสนอแนะ 5 ใช้ง่ายดีครับ" in replies[-1][1]
+    assert "• เริ่มใช้งาน" in replies[-1][1]
+    assert "• เสนอแนะ 5 ใช้ง่ายดี" in replies[-1][1]
     assert len(replies[-1][1]) < LINE_TEXT_LIMIT

@@ -2,6 +2,9 @@
 
 The formatters accept ``TypedDict``-shaped mappings, but at runtime ordinary
 dictionaries are enough.  This keeps database and webhook integration simple.
+
+Copy style: lead with the result, one idea per line, plain spoken Thai, a blank
+line between blocks, and commands the user can type in straight double quotes.
 """
 
 from __future__ import annotations
@@ -12,6 +15,47 @@ from typing import Final, Iterable, Mapping, NotRequired, TypedDict
 
 
 SAFE_LINE_TEXT_LIMIT: Final = 4_900
+
+THAI_MONTHS: Final = (
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+)
+THAI_MONTHS_SHORT: Final = (
+    "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
+)
+
+UNKNOWN_HEADING: Final = "หมูตุ๋นยังไม่เข้าใจข้อความนี้ 🐷"
+HELP_HINT: Final = 'พิมพ์ "ช่วยเหลือ" ดูคำสั่งทั้งหมด'
+
+# Parser reasons stay stable (code compares them); users see these instead.
+FRIENDLY_REASONS: Final[dict[str, str]] = {
+    "ไม่รู้จักคำสั่ง": UNKNOWN_HEADING,
+    "ไม่มีข้อความให้ประมวลผล": "ยังไม่ได้พิมพ์อะไรเลยครับ",
+    "กรุณาระบุว่าเป็นรายรับหรือรายจ่าย": 'บอกหน่อยว่าเป็นรายรับหรือรายจ่ายครับ เช่น "จ่าย 50" หรือ "รับ 500"',
+    "กรุณาระบุจำนวนเงินของเป้าหมาย": 'เป้านี้กี่บาทครับ? เช่น "ตั้งเป้า 1500 ซื้อหนังสือ"',
+    "กรุณาระบุจำนวนเงินที่ออม": 'ออมกี่บาทครับ? เช่น "ออม 100"',
+    "คำสั่งเพิ่มเงินออมมีข้อมูลที่ไม่รู้จัก": 'คำสั่งออมใส่แค่จำนวนเงินพอครับ เช่น "ออม 100"',
+    "จำนวนเงินต้องมากกว่า 0": "จำนวนเงินต้องมากกว่า 0 บาทครับ",
+    "จำนวนเงินมีทศนิยมได้ไม่เกิน 2 ตำแหน่ง": "จำนวนเงินใส่ทศนิยมได้ไม่เกิน 2 หลักครับ เช่น 45.50",
+    "รูปแบบจำนวนเงินไม่ถูกต้อง": "อ่านจำนวนเงินไม่ออกครับ ลองพิมพ์เป็นตัวเลข เช่น 50 หรือ 1,250",
+    "พบจำนวนเงินมากกว่าหนึ่งค่า": "เจอตัวเลขเงินมากกว่าหนึ่งจำนวน ส่งทีละรายการนะครับ",
+    "พบทั้งรายรับและรายจ่ายในข้อความเดียวกัน": "ข้อความนี้มีทั้งรายรับและรายจ่าย แยกส่งทีละรายการนะครับ",
+    "พบวันที่มากกว่าหนึ่งค่า": "เจอวันที่มากกว่าหนึ่งวัน ใส่วันเดียวพอครับ",
+    "วันที่ไม่ถูกต้อง": 'วันที่ดูไม่ถูกต้องครับ ลองใหม่ เช่น "ข้าว 50 เมื่อวาน"',
+    "ข้อความนี้เป็นการปฏิเสธ จึงยังไม่บันทึก": "ข้อความนี้เป็นประโยคปฏิเสธ เลยยังไม่จดให้ครับ",
+    "ข้อความนี้ดูเป็นรายการที่ยังไม่เกิดขึ้น จึงยังไม่บันทึก": "ดูเหมือนเป็นเรื่องที่ยังไม่เกิดขึ้น เลยยังไม่จดให้ครับ",
+    "ชื่อรายการยาวเกิน 500 ตัวอักษร": "ชื่อรายการยาวไปหน่อย ได้ไม่เกิน 500 ตัวอักษรครับ",
+    "ชื่อหมวดยาวเกิน 100 ตัวอักษร": "ชื่อหมวดยาวไปหน่อย ได้ไม่เกิน 100 ตัวอักษรครับ",
+    "ชื่อเป้าหมายยาวเกิน 200 ตัวอักษร": "ชื่อเป้าหมายยาวไปหน่อย ได้ไม่เกิน 200 ตัวอักษรครับ",
+    "ยังไม่มีข้อมูลธุรกรรมที่ใช้เติมรายการ": "ยังจดไม่ได้ ขาดข้อมูลอีกนิดครับ ตอบเฉพาะที่ถามได้เลย",
+    "ยังไม่มีข้อมูลใหม่ที่ใช้เติมรายการ": "ข้อความนี้ยังไม่มีข้อมูลที่ขาดอยู่ครับ ตอบเฉพาะที่ถามได้เลย",
+    'ข้อมูลนี้ขัดกับรายการที่ค้างไว้ครับ กรุณาส่งข้อมูลที่ขาด หรือพิมพ์ "ยกเลิก"':
+        'ข้อความนี้ไม่ตรงกับรายการที่ถามค้างไว้ครับ ตอบเฉพาะที่ขาด หรือพิมพ์ "ยกเลิก"',
+    'กรุณาระบุข้อมูลใหม่หลังคำว่า "แก้ไข" ครับ': 'พิมพ์ข้อมูลใหม่ต่อจากคำว่า "แก้ไข" ครับ เช่น "แก้ไข ข้าว 60"',
+    "คำสั่งแก้ไขต้องระบุรายการและจำนวนเงินให้ครบในข้อความเดียวครับ":
+        'แก้ไขต้องใส่ทั้งชื่อรายการและจำนวนเงินครับ เช่น "แก้ไข ข้าว 60"',
+}
 
 
 class Transaction(TypedDict):
@@ -58,11 +102,13 @@ def buddhist_year(year: int) -> int:
 
 
 def format_buddhist_date(value: date | datetime) -> str:
-    return f"{value.day:02d}/{value.month:02d}/{buddhist_year(value.year)}"
+    """Short Thai date for chat, e.g. ``1 พ.ย. 69``."""
+
+    return f"{value.day} {THAI_MONTHS_SHORT[value.month - 1]} {buddhist_year(value.year) % 100:02d}"
 
 
 def format_buddhist_month(value: date | datetime) -> str:
-    return f"เดือน {value.month}/{buddhist_year(value.year)}"
+    return f"เดือน{THAI_MONTHS[value.month - 1]} {buddhist_year(value.year)}"
 
 
 def format_transaction_confirmation(transaction: Mapping[str, object]) -> str:
@@ -70,23 +116,11 @@ def format_transaction_confirmation(transaction: Mapping[str, object]) -> str:
 
     kind = _kind(transaction.get("type"))
     amount = abs(_decimal(transaction.get("amount", 0)))
-    category = _clean(transaction.get("category"), "ไม่ระบุหมวด")
-    happened_on = _format_date(transaction.get("date"))
-
-    lines = [
-        f"✅ บันทึก{kind}แล้ว",
-    ]
-    note = _clean(transaction.get("note"), "")
-    if note and note != "ไม่ระบุรายการ":
-        lines.append(f"รายการ: {note}")
-    lines.extend([
-        f"จำนวน: {format_amount(amount)} บาท",
-        f"หมวด: {category}",
-    ])
-    if happened_on:
-        lines.append(f"วันที่: {happened_on}")
-    lines.append("พิมพ์ “ลบล่าสุด” หากบันทึกผิด")
-    return limit_line_text("\n".join(lines))
+    return limit_line_text(
+        f"✅ จดแล้ว! {kind} {format_amount(amount)} บาท\n"
+        f"{_details(transaction)}\n\n"
+        'จดผิด? พิมพ์ "ลบล่าสุด" ได้เลย'
+    )
 
 
 def format_edit_confirmation(transaction: Mapping[str, object]) -> str:
@@ -94,22 +128,10 @@ def format_edit_confirmation(transaction: Mapping[str, object]) -> str:
 
     kind = _kind(transaction.get("type"))
     amount = abs(_decimal(transaction.get("amount", 0)))
-    category = _clean(transaction.get("category"), "ไม่ระบุหมวด")
-    happened_on = _format_date(transaction.get("date"))
-
-    lines = [
-        f"✏️ แก้ไข{kind}ล่าสุดแล้ว",
-    ]
-    note = _clean(transaction.get("note"), "")
-    if note and note != "ไม่ระบุรายการ":
-        lines.append(f"รายการ: {note}")
-    lines.extend([
-        f"จำนวน: {format_amount(amount)} บาท",
-        f"หมวด: {category}",
-    ])
-    if happened_on:
-        lines.append(f"วันที่: {happened_on}")
-    return limit_line_text("\n".join(lines))
+    return limit_line_text(
+        f"✏️ แก้แล้ว! ตอนนี้เป็น{kind} {format_amount(amount)} บาท\n"
+        f"{_details(transaction)}"
+    )
 
 
 def format_delete_confirmation_prompt(transaction: Mapping[str, object]) -> str:
@@ -117,31 +139,21 @@ def format_delete_confirmation_prompt(transaction: Mapping[str, object]) -> str:
 
     kind = _kind(transaction.get("type"))
     amount = abs(_decimal(transaction.get("amount", 0)))
-    category = _clean(transaction.get("category"), "ไม่ระบุหมวด")
-    note = _clean(transaction.get("note"), "ไม่ระบุรายการ")
-    happened_on = _format_date(transaction.get("date")) or "ไม่ระบุวันที่"
-    lines = [
-        "ยืนยันลบรายการนี้หรือไม่?",
-        f"ประเภท: {kind}",
-        f"รายการ: {note}",
-        f"จำนวน: {format_amount(amount)} บาท",
-        f"หมวด: {category}",
-        f"วันที่: {happened_on}",
-        'พิมพ์ "ยืนยัน" เพื่อลบ หรือ "ยกเลิก"',
-    ]
-    return limit_line_text("\n".join(lines))
+    return limit_line_text(
+        "ลบรายการนี้ไหมครับ?\n"
+        f"{kind} {format_amount(amount)} บาท\n"
+        f"{_details(transaction, missing_date='ไม่ระบุวันที่')}\n\n"
+        'พิมพ์ "ยืนยัน" เพื่อลบ หรือ "ยกเลิก" ถ้าไม่ลบ'
+    )
 
 
 def format_delete_success(transaction: Mapping[str, object]) -> str:
     """Confirm a completed deletion and advertise the 10-minute undo window."""
 
-    amount = abs(_decimal(transaction.get("amount", 0)))
-    category = _clean(transaction.get("category"), "ไม่ระบุหมวด")
-    happened_on = _format_date(transaction.get("date")) or "ไม่ระบุวันที่"
     return limit_line_text(
-        "🗑️ ลบรายการเรียบร้อยแล้ว\n"
-        f"{category} · {format_amount(amount)} บาท · {happened_on}\n"
-        'พิมพ์ "เลิกทำ" ภายใน 10 นาทีเพื่อกู้คืน'
+        "🗑️ ลบแล้ว\n"
+        f"{_short_line(transaction)}\n\n"
+        'เผลอลบ? พิมพ์ "เลิกทำ" ภายใน 10 นาทีเพื่อเอาคืน'
     )
 
 
@@ -149,11 +161,11 @@ def format_delete_all_confirmation_prompt(transaction_count: int) -> str:
     """Warn before irreversibly erasing every piece of the user's data."""
 
     return limit_line_text(
-        "คุณกำลังจะลบข้อมูลทั้งหมด "
-        f"(รายการ {transaction_count:,} รายการ, เป้าหมายการออม และสถานะที่ค้างอยู่)\n"
-        "การกระทำนี้ไม่สามารถย้อนกลับได้ "
-        "(บันทึกของระบบบางส่วนจะถูกคงไว้เพื่อป้องกันข้อผิดพลาด)\n\n"
-        "พิมพ์ 'ยืนยัน' เพื่อลบ หรือ 'ยกเลิก' เพื่อกลับไปหน้าปกติ"
+        "⚠️ จะลบข้อมูลทั้งหมดจริงไหมครับ?\n"
+        f"รายการ {transaction_count:,} รายการ เป้าหมายการออม และสิ่งที่ค้างไว้จะหายหมด "
+        "และเอาคืนไม่ได้\n"
+        "(ระบบยังเก็บบันทึกการทำงานบางส่วนไว้ เพื่อป้องกันข้อผิดพลาด)\n\n"
+        'พิมพ์ "ยืนยัน" เพื่อลบทั้งหมด หรือ "ยกเลิก" ถ้าไม่ลบ'
     )
 
 
@@ -161,52 +173,43 @@ def format_delete_all_success() -> str:
     """Confirm a completed total wipe without advertising an undo window."""
 
     return limit_line_text(
-        "🗑️ ลบข้อมูลทั้งหมดเรียบร้อยแล้ว\n"
-        "ระบบได้ลบรายการ เป้าหมายการออม และสถานะที่ค้างอยู่ของคุณทั้งหมด"
+        "🗑️ ลบข้อมูลทั้งหมดแล้ว\n"
+        "ลบรายการ เป้าหมายการออม และสิ่งที่ค้างไว้ให้หมดแล้วครับ"
     )
 
 
 def format_delete_all_cancelled() -> str:
-    return "ยกเลิกการลบข้อมูลทั้งหมดแล้ว"
+    return "โอเค ไม่ลบแล้ว ข้อมูลยังอยู่ครบครับ"
 
 
 def format_delete_all_no_data() -> str:
-    return "ไม่มีข้อมูลให้ลบครับ"
+    return "ยังไม่มีข้อมูลให้ลบครับ"
 
 
 def format_delete_all_expired() -> str:
-    return (
-        "คำสั่งลบข้อมูลทั้งหมดหมดอายุแล้ว "
-        "กรุณาส่ง 'ลบข้อมูลทั้งหมด' อีกครั้งหากต้องการลบ"
-    )
+    return 'คำสั่งลบทั้งหมดหมดเวลาแล้ว ถ้ายังอยากลบ พิมพ์ "ลบข้อมูลทั้งหมด" อีกครั้งครับ'
 
 
 def format_undo_restored(transaction: Mapping[str, object]) -> str:
     """Confirm that a deleted transaction was restored from its snapshot."""
 
-    amount = abs(_decimal(transaction.get("amount", 0)))
-    category = _clean(transaction.get("category"), "ไม่ระบุหมวด")
-    happened_on = _format_date(transaction.get("date")) or "ไม่ระบุวันที่"
-    return limit_line_text(
-        "↩️ กู้คืนรายการเรียบร้อยแล้ว\n"
-        f"{category} · {format_amount(amount)} บาท · {happened_on}"
-    )
+    return limit_line_text(f"↩️ เอาคืนมาแล้ว\n{_short_line(transaction)}")
 
 
 def format_undo_expired() -> str:
-    return "หมดเวลาย้อนกลับแล้วครับ รายการที่ลบไปแล้วไม่สามารถกู้คืนได้"
+    return "เลย 10 นาทีแล้ว เลยเอารายการที่ลบคืนมาไม่ได้ครับ"
 
 
 def format_undo_unavailable() -> str:
-    return "ไม่มีรายการให้ย้อนกลับครับ"
+    return "ไม่มีรายการที่เพิ่งลบให้เอาคืนครับ"
 
 
 def format_delete_not_confirmed_yet() -> str:
-    return 'ยังไม่มีการลบให้ย้อนกลับ กรุณายืนยันการลบก่อน'
+    return 'ยังไม่ได้ลบอะไรเลยครับ ถ้าจะลบ พิมพ์ "ยืนยัน" ก่อน'
 
 
 def format_undo_id_collision() -> str:
-    return "ไม่สามารถย้อนกลับได้เนื่องจากมีข้อมูลอื่นทับซ้อน"
+    return "เอารายการคืนไม่ได้ เพราะมีข้อมูลอื่นซ้ำกันอยู่ครับ"
 
 
 def format_recent_transactions(
@@ -214,24 +217,24 @@ def format_recent_transactions(
     *,
     limit: int = 10,
 ) -> str:
-    """Render recent transactions as a compact numbered list."""
+    """Render recent transactions as a compact list, newest first."""
 
     if limit <= 0:
-        return "ยังไม่มีรายการให้แสดง"
+        return "ยังไม่มีรายการให้ดูครับ"
 
     items = list(transactions)[:limit]
     if not items:
-        return "ยังไม่มีรายการรายรับรายจ่าย ลองพิมพ์ “ข้าว 50”"
+        return 'ยังไม่มีรายการเลย ลองพิมพ์ "ข้าว 50" ดูครับ'
 
-    lines = ["🧾 รายการล่าสุด"]
-    for index, item in enumerate(items, start=1):
+    lines = ["🧾 รายการล่าสุด", ""]
+    for item in items:
         kind = _kind(item.get("type"))
         sign = "+" if kind == "รายรับ" else "−"
         icon = "🟢" if kind == "รายรับ" else "🔴"
         amount = format_amount(abs(_decimal(item.get("amount", 0))))
         category = _clean(item.get("category"), "ไม่ระบุหมวด")
         happened_on = _format_date(item.get("date")) or "ไม่ระบุวันที่"
-        lines.append(f"{index}. {icon} {happened_on} · {category} · {sign}{amount} บาท")
+        lines.append(f"{icon} {happened_on} · {category} · {sign}{amount} บาท")
 
     return limit_line_text("\n".join(lines))
 
@@ -249,23 +252,26 @@ def format_monthly_summary(summary: Mapping[str, object]) -> str:
 
     lines = [
         f"📊 สรุป{month}",
-        f"รายรับ: {format_amount(income)} บาท",
-        f"รายจ่าย: {format_amount(expense)} บาท",
-        f"คงเหลือ: {format_amount(balance)} บาท",
+        "",
+        f"รายรับ {format_amount(income)} บาท",
+        f"รายจ่าย {format_amount(expense)} บาท",
+        f"เหลือ {format_amount(balance)} บาท"
+        if balance >= 0
+        else f"ใช้เกินไป {format_amount(-balance)} บาท",
     ]
     count = summary.get("transaction_count")
     if isinstance(count, int) and count >= 0:
-        lines.append(f"ทั้งหมด: {count:,} รายการ")
+        lines.append(f"จดไปแล้ว {count:,} รายการ")
 
     categories = summary.get("top_categories")
     if isinstance(categories, list) and categories:
-        lines.append("\nหมวดรายจ่ายสูงสุด")
+        lines.extend(["", "ใช้เงินกับอะไรมากสุด"])
         for item in categories[:3]:
             if not isinstance(item, Mapping):
                 continue
             category = _clean(item.get("category"), "ไม่ระบุหมวด")
             amount = format_amount(abs(_decimal(item.get("amount", 0))))
-            lines.append(f"• {category}: {amount} บาท")
+            lines.append(f"• {category} {amount} บาท")
 
     return limit_line_text("\n".join(lines))
 
@@ -282,17 +288,17 @@ def format_savings_goal(goal: Mapping[str, object]) -> str:
 
     lines = [
         f"🎯 {name}",
-        f"ออมแล้ว: {format_amount(saved)} / {format_amount(target)} บาท",
-        f"ความคืบหน้า: {format_amount(display_percent)}%",
+        f"ออมแล้ว {format_amount(saved)} จาก {format_amount(target)} บาท "
+        f"({format_amount(display_percent)}%)",
     ]
     if remaining:
-        lines.append(f"เหลืออีก: {format_amount(remaining)} บาท")
+        lines.append(f"อีก {format_amount(remaining)} บาทก็ถึงเป้า")
     elif target > 0:
-        lines.append("สำเร็จตามเป้าหมายแล้ว 🎉")
+        lines.append("ถึงเป้าแล้ว เก่งมาก 🎉")
 
     due_date = _format_date(goal.get("due_date"))
     if due_date:
-        lines.append(f"กำหนด: {due_date}")
+        lines.append(f"ภายใน {due_date}")
     return limit_line_text("\n".join(lines))
 
 
@@ -300,17 +306,40 @@ def format_savings_goal(goal: Mapping[str, object]) -> str:
 format_savings_progress = format_savings_goal
 
 
+def format_savings_goal_created(goal: Mapping[str, object]) -> str:
+    return limit_line_text(f"ตั้งเป้าเรียบร้อย!\n\n{format_savings_goal(goal)}")
+
+
+def format_savings_added(goal: Mapping[str, object]) -> str:
+    return limit_line_text(f"💰 เก็บเพิ่มแล้ว!\n\n{format_savings_goal(goal)}")
+
+
+def format_no_savings_goal() -> str:
+    return 'ยังไม่มีเป้าหมายการออม ลองพิมพ์ "ตั้งเป้า 1500 ซื้อหนังสือ" ดูครับ'
+
+
+def friendly_reason(reason: str | None) -> str:
+    """Map a parser reason to user-facing copy (unknown reasons pass through)."""
+
+    text = _clean(reason, "")
+    if not text:
+        return UNKNOWN_HEADING
+    return FRIENDLY_REASONS.get(text, text)
+
+
 def format_unknown_message(reason: str | None = None) -> str:
     """Explain an unresolved command, optionally including the parser reason."""
 
-    heading = _clean(reason, "ยังไม่เข้าใจข้อความนี้")
+    heading = friendly_reason(reason)
+    if heading != UNKNOWN_HEADING:
+        return f"{heading}\n\n{HELP_HINT}"
     return (
-        f"{heading}\nลองพิมพ์ เช่น\n"
+        f"{UNKNOWN_HEADING}\n"
+        "ลองพิมพ์แบบนี้ดูครับ\n"
         "• ข้าว 50\n"
         "• เงินเดือน 20000\n"
-        "• จ่าย 500\n"
         "• สรุปเดือนนี้\n\n"
-        "พิมพ์ “ช่วยเหลือ” เพื่อดูคำสั่งทั้งหมด"
+        f"หรือ{HELP_HINT}"
     )
 
 
@@ -321,94 +350,91 @@ def format_pending_transaction_prompt(
 ) -> str:
     if amount is None:
         item = _clean(description, "รายการนี้")
-        return f"{item} ราคาเท่าไหร่ครับ? เช่น 50"
-    return f"{format_amount(amount)} บาท เป็นรายรับหรือรายจ่ายครับ?"
+        return f"{item} กี่บาทครับ? พิมพ์แค่ตัวเลขได้เลย เช่น 50"
+    return f'{format_amount(amount)} บาทนี้ เป็นรายรับหรือรายจ่ายครับ? ตอบสั้นๆ ได้เลย เช่น "รายจ่าย"'
 
 
 def format_pending_conflict() -> str:
-    return 'ข้อมูลนี้ขัดกับรายการที่ค้างไว้ครับ กรุณาส่งข้อมูลที่ขาด หรือพิมพ์ "ยกเลิก"'
+    return 'ข้อความนี้ไม่ตรงกับรายการที่ถามค้างไว้ครับ ตอบเฉพาะที่ขาด หรือพิมพ์ "ยกเลิก"'
 
 
 def format_invalid_followup() -> str:
-    return 'ยังบันทึกไม่ได้ครับ กรุณาระบุข้อมูลที่ขาด หรือพิมพ์ "ยกเลิก"'
+    return 'ยังจดไม่ได้ ขาดข้อมูลอีกนิดครับ ตอบเฉพาะที่ถาม หรือพิมพ์ "ยกเลิก"'
 
 
 def format_feedback_success(rating: int) -> str:
-    return limit_line_text(
-        f"บันทึกข้อเสนอแนะระดับ {rating} ดาวเรียบร้อย ขอบคุณที่ช่วยพัฒนาหมูตุ๋นครับ 🐷"
-    )
+    return limit_line_text(f"ได้รับแล้ว {rating} ดาว ขอบคุณที่ช่วยให้หมูตุ๋นดีขึ้นครับ 🐷")
 
 
 def format_feedback_instruction() -> str:
     return limit_line_text(
-        "หากต้องการส่งข้อเสนอแนะ กรุณาพิมพ์ 'เสนอแนะ [คะแนน 1-5]' "
-        "หรือ 'เสนอแนะ [คะแนน] [ข้อความ]' เช่น:\n"
-        "- เสนอแนะ 5\n- เสนอแนะ 4 ใช้ง่ายดีครับ"
+        'อยากบอกอะไรหมูตุ๋น พิมพ์ "เสนอแนะ" ตามด้วยคะแนน 1-5 และข้อความ (ถ้ามี) เช่น\n'
+        "• เสนอแนะ 5\n"
+        "• เสนอแนะ 4 ใช้ง่ายดีครับ"
     )
 
 
 def format_feedback_invalid_rating() -> str:
-    return "คะแนนข้อเสนอแนะต้องเป็นตัวเลข 1 ถึง 5 เท่านั้นครับ เช่น 'เสนอแนะ 5'"
+    return 'คะแนนต้องเป็นเลข 1 ถึง 5 ครับ เช่น "เสนอแนะ 5"'
 
 
 def format_feedback_comment_too_long() -> str:
-    return (
-        "ข้อความเสนอแนะยาวเกินไป (สูงสุด 1000 ตัวอักษร) "
-        "กรุณาสรุปข้อความแล้วส่งใหม่อีกครั้งครับ"
-    )
+    return "ข้อความยาวไปหน่อย ได้ไม่เกิน 1,000 ตัวอักษร ช่วยย่อแล้วส่งใหม่นะครับ"
 
 
 def format_export_link(url: str) -> str:
-    return f"ดาวน์โหลดข้อมูลรายการเป็น CSV ได้ที่ลิงก์นี้ครับ (ลิงก์มีอายุ 10 นาที)\n{url}"
+    return f"📄 ไฟล์ CSV พร้อมแล้ว กดลิงก์เพื่อดาวน์โหลด (ใช้ได้ 10 นาที)\n{url}"
 
 
 def format_export_no_data() -> str:
-    return "ไม่มีข้อมูลสำหรับส่งออกครับ"
+    return "ยังไม่มีรายการให้ส่งออกครับ"
 
 
 def format_export_unavailable() -> str:
-    return "ยังไม่สามารถส่งออกข้อมูลได้ในขณะนี้ครับ กรุณาลองใหม่ภายหลัง"
+    return "ตอนนี้ส่งออกข้อมูลไม่ได้ ลองใหม่อีกสักพักนะครับ"
 
 
 def format_onboarding_welcome() -> str:
     return limit_line_text(
-        "🐷 สวัสดีครับ หมูตุ๋นช่วยจดรายรับ รายจ่าย และเงินออมผ่านแชตครับ\n\n"
-        "เริ่มได้เลย เช่น\n"
+        "🐷 สวัสดีครับ หมูตุ๋นช่วยจดรายรับรายจ่ายและเงินออมให้ แค่พิมพ์ในแชต\n\n"
+        "ลองเลย เช่น\n"
         "• ข้าว 50\n"
         "• เงินเดือน 20000\n"
         "• สรุปเดือนนี้\n\n"
-        "ดูคำสั่งเพิ่มเติม: ช่วยเหลือ\n"
-        "ดูข้อความเริ่มต้นนี้อีกครั้ง: เริ่มใช้งาน\n"
-        "ส่งข้อเสนอแนะ: เสนอแนะ 5 ใช้ง่ายดีครับ\n\n"
-        "ข้อมูลของคุณแยกตาม LINE user ID และลบข้อมูลของคุณได้ด้วย `ลบข้อมูลทั้งหมด` ครับ"
+        'ดูคำสั่งทั้งหมด: "ช่วยเหลือ"\n'
+        'ดูข้อความนี้อีกครั้ง: "เริ่มใช้งาน"\n'
+        'บอกความเห็น: "เสนอแนะ 5 ใช้ง่ายดี"\n\n'
+        'ข้อมูลของคุณแยกตามบัญชี LINE และลบทั้งหมดได้ทุกเมื่อด้วย "ลบข้อมูลทั้งหมด"'
     )
 
 
 def format_onboarding_usage() -> str:
-    return limit_line_text(
-        "คำสั่งเริ่มใช้งานไม่ต้องใส่ข้อมูลเพิ่มเติมครับ พิมพ์ 'เริ่มใช้งาน' ได้เลย"
-    )
+    return limit_line_text('พิมพ์แค่ "เริ่มใช้งาน" คำเดียวพอครับ ไม่ต้องใส่อะไรต่อท้าย')
 
 
 def format_help_message() -> str:
     return (
         "🐷 วิธีใช้หมูตุ๋น\n\n"
-        "พิมพ์รายการและจำนวนเงินได้เลย\n"
-        "จดรายจ่าย: ข้าว 50 หรือ BTS 47\n"
-        "จดรายรับ: เงินเดือน 20000 หรือ แม่ให้ 500\n"
-        "ระบุเองได้: จ่าย 50 หรือ รับ 500\n"
-        "ดูรายการ: รายการล่าสุด\n"
-        "ดูสรุป: สรุปเดือนนี้\n"
-        "ส่งออก CSV: ส่งออกข้อมูล\n"
-        "ลบรายการ: ลบล่าสุด (ต้องยืนยันก่อนลบ)\n"
-        "ย้อนกลับการลบ: เลิกทำ (ภายใน 10 นาที)\n"
-        "ลบข้อมูลทั้งหมด: ลบข้อมูลทั้งหมด (ต้องยืนยัน)\n"
-        "แก้ไขรายการล่าสุด: แก้ไข ข้าว 60\n"
-        "ตั้งเป้าหมาย: ตั้งเป้า 1500 ซื้อหนังสือ\n"
-        "เพิ่มเงินออม: ออม 100\n"
-        "ดูเป้าหมาย: เป้าหมายการออม\n"
-        "ดูข้อความเริ่มต้น: เริ่มใช้งาน\n"
-        "ส่งข้อเสนอแนะ: เสนอแนะ 5 ใช้ง่ายดีครับ"
+        "จดรายการ: พิมพ์ชื่อกับจำนวนเงิน\n"
+        "• ข้าว 50, BTS 47 (รายจ่าย)\n"
+        "• เงินเดือน 20000, แม่ให้ 500 (รายรับ)\n"
+        "• ระบุเองก็ได้: จ่าย 50, รับ 500\n\n"
+        "ดูข้อมูล\n"
+        "• รายการล่าสุด\n"
+        "• สรุปเดือนนี้\n"
+        "• ส่งออกข้อมูล (ไฟล์ CSV)\n\n"
+        "แก้หรือลบ\n"
+        "• แก้ไข ข้าว 60 (แก้รายการล่าสุด)\n"
+        "• ลบล่าสุด (ถามยืนยันก่อน)\n"
+        "• เลิกทำ (เอาคืนภายใน 10 นาที)\n"
+        "• ลบข้อมูลทั้งหมด (ถามยืนยันก่อน)\n\n"
+        "เงินออม\n"
+        "• ตั้งเป้า 1500 ซื้อหนังสือ\n"
+        "• ออม 100\n"
+        "• เป้าหมายการออม\n\n"
+        "อื่นๆ\n"
+        "• เริ่มใช้งาน\n"
+        "• เสนอแนะ 5 ใช้ง่ายดี"
     )
 
 
@@ -420,6 +446,27 @@ def limit_line_text(text: str, limit: int = SAFE_LINE_TEXT_LIMIT) -> str:
     if len(text) <= limit:
         return text
     return f"{text[: limit - 1].rstrip()}…"
+
+
+def _details(transaction: Mapping[str, object], *, missing_date: str = "") -> str:
+    """One line: note · category · date (note and date only when known)."""
+
+    parts = []
+    note = _clean(transaction.get("note"), "")
+    if note and note != "ไม่ระบุรายการ":
+        parts.append(note)
+    parts.append(_clean(transaction.get("category"), "ไม่ระบุหมวด"))
+    happened_on = _format_date(transaction.get("date")) or missing_date
+    if happened_on:
+        parts.append(happened_on)
+    return " · ".join(parts)
+
+
+def _short_line(transaction: Mapping[str, object]) -> str:
+    amount = abs(_decimal(transaction.get("amount", 0)))
+    category = _clean(transaction.get("category"), "ไม่ระบุหมวด")
+    happened_on = _format_date(transaction.get("date")) or "ไม่ระบุวันที่"
+    return f"{category} · {format_amount(amount)} บาท · {happened_on}"
 
 
 def _decimal(value: object) -> Decimal:
