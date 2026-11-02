@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import database
+import media
 from repository import (
     category_totals,
     get_savings_goal,
@@ -180,6 +181,19 @@ def asset(name: str, request: Request):
     if ASSET_NAME.fullmatch(name) is None or not path.is_file():
         raise WebAppError(404, "NOT_FOUND")
     return FileResponse(path, media_type=ASSET_TYPES[name.rsplit(".", 1)[1]])
+
+
+# Card artwork for chat Flex messages; LINE fetches these, so no WEBAPP_ENABLED gate.
+@router.get("/media/{name}", include_in_schema=False)
+def card_media(name: str):
+    path = media.MEDIA_DIR / name
+    if media.MEDIA_NAME.fullmatch(name) is None or not path.is_file():
+        raise WebAppError(404, "NOT_FOUND")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.get("/app/config.json", include_in_schema=False)
