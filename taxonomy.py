@@ -283,12 +283,23 @@ def fallback_category(transaction_type: TransactionType) -> str:
     return "รายรับอื่นๆ" if transaction_type == "income" else "อื่นๆ"
 
 
+def categories(transaction_type: TransactionType) -> tuple[str, ...]:
+    """Every category the rules can produce for one type, fallback last."""
+
+    names = dict.fromkeys(
+        rule.category for rule in CATEGORY_RULES if rule.transaction_type == transaction_type
+    )
+    names.pop(fallback_category(transaction_type), None)
+    return (*names, fallback_category(transaction_type))
+
+
 __all__ = [
     "CATEGORY_RULES",
     "CategoryRule",
     "Classification",
     "SEMANTIC_ACTION_PHRASES",
     "TransactionType",
+    "categories",
     "classify_item",
     "fallback_category",
     "has_supported_item_prefix",
