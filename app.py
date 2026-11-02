@@ -21,8 +21,26 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from database import init_db, session_scope
-from line_api import LineAPIError, reply_text, verify_webhook_signature
+from flex import (
+    MonthTotal,
+    confirm_quick_reply,
+    deleted_card,
+    direction_quick_reply,
+    help_quick_reply,
+    transaction_card,
+)
+from line_api import (
+    LineAPIError,
+    reply_messages,
+    reply_text,
+    start_loading,
+    verify_webhook_signature,
+)
+from media import media_url
 from messages import (
+    HELP_TOPIC_TEXT,
+    format_already_deleted,
+    format_undo_button_expired,
     format_buddhist_month,
     format_delete_all_cancelled,
     format_delete_all_confirmation_prompt,
@@ -78,8 +96,11 @@ from parser import (
     parse_followup,
     parse_onboarding,
 )
+from postback import DeleteTx, HelpTopic, PostbackCommand, Undo, parse_postback
+from replies import Reply, as_reply
 from repository import (
     DELETE_ALL_TARGET_SENTINEL,
+    DeleteOutcome,
     PendingActionConflictError,
     PendingActionState,
     PendingTransactionConflictError,
@@ -87,12 +108,14 @@ from repository import (
     add_savings_progress,
     add_transaction,
     add_user_feedback,
+    category_month_total,
     confirm_delete_transaction,
     create_export_token,
     create_pending_action,
     create_pending_transaction,
     delete_pending_action,
     delete_pending_transaction,
+    delete_transaction_with_undo,
     execute_delete_all,
     fetch_export_transactions,
     get_latest_transaction,
@@ -199,6 +222,47 @@ def _transaction_data(item: Any) -> dict[str, Any]:
     }
 
 
+def _liff_id() -> str | None:
+    return os.getenv("MINIAPP_DEVELOPING_LIFF_ID", "").strip() or None
+
+
+def _card_image(pose: str) -> str | None:
+    try:
+        base_url = _export_base_url()
+    except RuntimeError:
+        return None
+    return media_url(pose, base_url)
+
+
+def _card_context(line_user_id: str, item: Any, session: Session) -> tuple[dict[str, Any], MonthTotal]:
+    """Card fields plus this category's total for the Bangkok month of ``occurred_on``."""
+
+    day = item.occurred_on
+    category_satang, type_total = category_month_total(
+        line_user_id, item.transaction_type, item.category, day.year, day.month, session=session
+    )
+    return {**_transaction_data(item), "id": item.id}, MonthTotal(category_satang, type_total)
+
+
+def _transaction_reply(variant: str, text: str, line_user_id: str, item: Any, session: Session) -> Reply:
+    tx, total = _card_context(line_user_id, item, session)
+    card = transaction_card(variant, tx, total, liff_id=_liff_id(), image_url=_card_image(variant))
+    return Reply(text, flex=card)
+
+
+def _deleted_reply(line_user_id: str, item: Any, action_id: str | None, session: Session) -> Reply:
+    text = format_delete_success(_transaction_data(item))
+    if action_id is None:
+        return Reply(text)
+    tx, total = _card_context(line_user_id, item, session)
+    return Reply(text, flex=deleted_card(tx, total, action_id=action_id, image_url=_card_image("delete")))
+
+
+def _pending_prompt(*, amount: Any, description: str | None) -> Reply:
+    text = format_pending_transaction_prompt(amount=amount, description=description)
+    return Reply(text, quick_reply=direction_quick_reply() if amount is not None else ())
+
+
 def _goal_data(goal: Any) -> dict[str, Any]:
     return {
         "name": goal.title,
@@ -231,7 +295,7 @@ def handle_text_message(
     text: str,
     event_time: datetime,
     session: Session,
-) -> str:
+) -> str | Reply:
     """Run one verified user's command and return a Thai LINE reply."""
 
     processing_time = _utc_now()
@@ -309,7 +373,8 @@ def handle_text_message(
                 return PENDING_ACTION_RETRY_REPLY
             if item is None:
                 return "หารายการที่จะลบไม่เจอ อาจถูกลบไปแล้วครับ"
-            return format_delete_success(_transaction_data(item))
+            undo = get_pending_action(line_user_id, now=_utc_now(), session=session).action
+            return _deleted_reply(line_user_id, item, undo.action_id if undo is not None else None, session)
         if normalized_text == "ยกเลิก":
             if not delete_pending_action(
                 line_user_id,
@@ -364,7 +429,13 @@ def handle_text_message(
             if outcome.outcome == RestoreOutcome.ID_COLLISION:
                 return format_undo_id_collision()
             assert outcome.transaction is not None
-            return format_undo_restored(_transaction_data(outcome.transaction))
+            return _transaction_reply(
+                "restore",
+                format_undo_restored(_transaction_data(outcome.transaction)),
+                line_user_id,
+                outcome.transaction,
+                session,
+            )
         if normalized_text == "ยืนยัน":
             return format_unknown_message()
 
@@ -448,7 +519,9 @@ def handle_text_message(
         )
         if item is None:
             return "ยังไม่มีรายการให้แก้ครับ"
-        return format_edit_confirmation(_transaction_data(item))
+        return _transaction_reply(
+            "edit", format_edit_confirmation(_transaction_data(item)), line_user_id, item, session
+        )
 
     if pending is not None and isinstance(command, TransactionCommand):
         if pending_delete_confirmation is not None:
@@ -517,7 +590,7 @@ def handle_text_message(
                 session=session,
             ):
                 return PENDING_ACTION_RETRY_REPLY
-            return format_pending_transaction_prompt(
+            return _pending_prompt(
                 amount=followup.amount,
                 description=followup.description,
             )
@@ -539,7 +612,7 @@ def handle_text_message(
             session=session,
         ):
             return PENDING_ACTION_RETRY_REPLY
-        return format_pending_transaction_prompt(
+        return _pending_prompt(
             amount=command.amount,
             description=command.description,
         )
@@ -562,7 +635,9 @@ def handle_text_message(
             occurred_on=command.transaction_date,
             session=session,
         )
-        return format_transaction_confirmation(_transaction_data(item))
+        return _transaction_reply(
+            "record", format_transaction_confirmation(_transaction_data(item)), line_user_id, item, session
+        )
 
     if isinstance(command, SavingsGoalCommand):
         if pending_delete_all is not None and not invalidate_pending_action(
@@ -609,7 +684,7 @@ def handle_text_message(
         return format_unknown_message()
 
     if command.kind == CommandKind.HELP:
-        return format_help_message()
+        return Reply(format_help_message(), quick_reply=help_quick_reply())
 
     if command.kind == CommandKind.RECENT:
         items = list_recent_transactions(line_user_id, limit=5, session=session)
@@ -637,7 +712,10 @@ def handle_text_message(
             session=session,
         ):
             return PENDING_ACTION_RETRY_REPLY
-        return format_delete_all_confirmation_prompt(summary.transaction_count)
+        return Reply(
+            format_delete_all_confirmation_prompt(summary.transaction_count),
+            quick_reply=confirm_quick_reply(),
+        )
 
     if command.kind == CommandKind.DELETE_LATEST:
         item = get_latest_transaction(line_user_id, session=session)
@@ -654,7 +732,7 @@ def handle_text_message(
                 session=session,
             ):
                 return PENDING_ACTION_RETRY_REPLY
-            return format_delete_confirmation_prompt(_transaction_data(item))
+            return Reply(format_delete_confirmation_prompt(_transaction_data(item)), quick_reply=confirm_quick_reply())
         if pending_delete_confirmation is not None and not invalidate_pending_action(
             line_user_id,
             pending_delete_confirmation.version,
@@ -673,7 +751,7 @@ def handle_text_message(
             session=session,
         ):
             return PENDING_ACTION_RETRY_REPLY
-        return format_delete_confirmation_prompt(_transaction_data(item))
+        return Reply(format_delete_confirmation_prompt(_transaction_data(item)), quick_reply=confirm_quick_reply())
 
     if command.kind == CommandKind.MONTHLY_SUMMARY:
         local = event_time.astimezone(BANGKOK)
@@ -768,6 +846,73 @@ async def readiness_check() -> dict[str, str]:
     return {"status": "ready"}
 
 
+async def _send_reply(reply_token: str, messages: list[dict]) -> None:
+    """Plain single text goes through reply_text; cards and quick replies use reply_messages."""
+
+    if len(messages) == 1 and messages[0].get("type") == "text" and "quickReply" not in messages[0]:
+        await reply_text(reply_token, messages[0]["text"], LINE_CHANNEL_ACCESS_TOKEN)
+    else:
+        await reply_messages(reply_token, messages, LINE_CHANNEL_ACCESS_TOKEN)
+
+
+def handle_postback(
+    line_user_id: str,
+    command: PostbackCommand,
+    event_time: datetime,
+    session: Session,
+) -> str | Reply:
+    """Run one of MooTun's own card/quick-reply postbacks for this user only."""
+
+    if isinstance(command, HelpTopic):
+        return HELP_TOPIC_TEXT[command.topic]
+
+    if isinstance(command, DeleteTx):
+        try:
+            result = delete_transaction_with_undo(
+                line_user_id, command.transaction_id, now=_utc_now(), session=session
+            )
+        except PendingActionConflictError:
+            return PENDING_ACTION_RETRY_REPLY
+        if result.outcome is DeleteOutcome.NOT_FOUND:
+            return format_already_deleted()
+        return _deleted_reply(line_user_id, result.transaction, result.action_id, session)
+
+    if isinstance(command, Undo):
+        try:
+            state = get_pending_action(line_user_id, now=_utc_now(), session=session)
+        except PendingActionConflictError:
+            return PENDING_ACTION_RETRY_REPLY
+        action = state.action
+        if (
+            action is None
+            or action.action_type != "undo_delete"
+            or action.action_id != command.action_id
+        ):
+            return format_undo_button_expired()
+        try:
+            outcome = restore_deleted_transaction(
+                line_user_id,
+                action.version,
+                expected_action_id=action.action_id,
+                now=_utc_now(),
+                session=session,
+            )
+        except PendingActionConflictError:
+            return PENDING_ACTION_RETRY_REPLY
+        if outcome.outcome == RestoreOutcome.ID_COLLISION:
+            return format_undo_id_collision()
+        assert outcome.transaction is not None
+        return _transaction_reply(
+            "restore",
+            format_undo_restored(_transaction_data(outcome.transaction)),
+            line_user_id,
+            outcome.transaction,
+            session,
+        )
+
+    raise TypeError(f"unsupported postback command: {command!r}")
+
+
 @app.post("/webhook")
 async def line_webhook(
     request: Request,
@@ -801,7 +946,7 @@ async def line_webhook(
 
         if (
             not isinstance(event_id, str)
-            or event_type not in ("message", "follow")
+            or event_type not in ("message", "follow", "postback")
             or not isinstance(source, dict)
             or source.get("type") != "user"
             or not isinstance(source.get("userId"), str)
@@ -811,34 +956,68 @@ async def line_webhook(
             not isinstance(message, dict) or message.get("type") != "text"
         ):
             continue
+        postback_data = None
+        if event_type == "postback":
+            postback = event.get("postback")
+            postback_data = postback.get("data") if isinstance(postback, dict) else None
+            if not isinstance(postback_data, str):
+                continue
+
+        if event_type in ("message", "postback"):
+            # "..." while we work; a failure must never block or change the reply.
+            try:
+                await start_loading(source["userId"], LINE_CHANNEL_ACCESS_TOKEN)
+            except LineAPIError as exc:
+                logger.warning("LINE loading indicator failed: %s", type(exc).__name__)
 
         with session_scope() as session:
             processed = get_webhook_event(event_id, session=session)
             if processed is not None:
                 if processed.reply_sent or not processed.response_text:
                     continue
-                response_text = processed.response_text
+                messages = (
+                    json.loads(processed.response_messages)
+                    if processed.response_messages
+                    else [{"type": "text", "text": processed.response_text}]
+                )
             else:
                 if not mark_webhook_processed(event_id, session=session):
                     continue
                 if event_type == "follow":
-                    response_text = format_onboarding_welcome()
+                    result: str | Reply | None = format_onboarding_welcome()
+                elif event_type == "postback":
+                    command = parse_postback(postback_data)
+                    result = (
+                        None
+                        if command is None
+                        else handle_postback(
+                            source["userId"], command, _event_datetime(event.get("timestamp")), session
+                        )
+                    )
                 else:
-                    response_text = handle_text_message(
+                    result = handle_text_message(
                         source["userId"],
                         str(message.get("text", "")),
                         _event_datetime(event.get("timestamp")),
                         session,
                     )
-                set_webhook_response(event_id, response_text, session=session)
+                if result is None:
+                    # Not one of our postbacks (e.g. the rich menu's): claimed, no reply.
+                    continue
+                reply = as_reply(result)
+                messages = reply.to_messages()
+                rich = reply.flex is not None or bool(reply.quick_reply)
+                # Plain text replays from response_text as before; cards need the full list.
+                set_webhook_response(
+                    event_id,
+                    reply.text,
+                    messages_json=json.dumps(messages, ensure_ascii=False) if rich else None,
+                    session=session,
+                )
 
         if isinstance(reply_token, str) and reply_token:
             try:
-                await reply_text(
-                    reply_token,
-                    response_text,
-                    LINE_CHANNEL_ACCESS_TOKEN,
-                )
+                await _send_reply(reply_token, messages)
             except LineAPIError as exc:
                 logger.error("LINE reply failed for event %s: %s", event_id, type(exc).__name__)
                 raise HTTPException(status_code=502, detail="LINE reply failed") from exc

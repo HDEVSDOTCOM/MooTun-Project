@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import app as app_module
+from line_fakes import LineRecorder
 import repository
 from database import configure_database, init_db
 from line_api import LineTransportError
@@ -66,14 +67,11 @@ def export_client(tmp_path, monkeypatch):
     engine = configure_database(f"sqlite:///{tmp_path / 'export-webhook.db'}")
     replies = []
 
-    async def fake_reply(reply_token, text, token):
-        replies.append((reply_token, text, token))
-
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RENDER_EXTERNAL_URL", BASE_URL + "///")
     monkeypatch.setattr(app_module, "LINE_CHANNEL_SECRET", SECRET)
     monkeypatch.setattr(app_module, "LINE_CHANNEL_ACCESS_TOKEN", "test-access-token")
-    monkeypatch.setattr(app_module, "reply_text", fake_reply)
+    LineRecorder(replies).install(monkeypatch, app_module)
     monkeypatch.setattr(app_module, "_utc_now", lambda: NOW)
     with TestClient(app_module.app) as client:
         yield client, engine, replies
