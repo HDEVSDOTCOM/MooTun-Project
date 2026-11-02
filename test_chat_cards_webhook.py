@@ -151,6 +151,7 @@ def test_rich_menu_postback_claimed_without_reply(bot, data):
     client, engine, line = bot
     assert _post(client, postback("e1", data)).status_code == 200
     assert line.replies == []
+    assert line.loading == []
     with Session(engine) as session:
         row = session.get(ProcessedWebhookEvent, "e1")
         assert row is not None and row.response_text is None
@@ -240,6 +241,13 @@ def test_loading_called_for_message_and_postback_not_follow(bot):
     _post(client, postback("e2", "a=help&t=income", user="U-y"))
     _post(client, follow("e3", user="U-z"))
     assert line.loading == ["U-x", "U-y"]
+
+
+def test_loading_skipped_for_redelivered_events(bot):
+    client, _, line = bot
+    _post(client, text("e1", "ข้าว 50", user="U-x"))
+    _post(client, text("e1", "ข้าว 50", user="U-x"))
+    assert line.loading == ["U-x"]
 
 
 def test_loading_failure_does_not_block_reply(bot, monkeypatch):
