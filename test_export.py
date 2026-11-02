@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import app as app_module
-from line_fakes import LineRecorder
+from line_fakes import LineRecorder, text_sender
 import repository
 from database import configure_database, init_db
 from line_api import LineTransportError
@@ -585,7 +585,7 @@ def test_unsent_cached_url_replays_without_remint_after_invalidation(export_clie
         if len(attempts) == 1:
             raise LineTransportError("temporary failure")
 
-    monkeypatch.setattr(app_module, "reply_text", fail_once)
+    monkeypatch.setattr(app_module, "reply_messages", text_sender(fail_once))
     assert _post_text(client, "export", USER, "ส่งออกข้อมูล").status_code == 502
     url = attempts[0].splitlines()[-1]
     with Session(engine) as session:

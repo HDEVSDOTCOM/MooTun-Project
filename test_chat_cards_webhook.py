@@ -7,6 +7,9 @@ import hashlib
 import hmac
 import json
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -14,6 +17,7 @@ from sqlalchemy.orm import Session
 
 import app as app_module
 from database import configure_database
+from flex import help_quick_reply
 from line_api import LineTransportError
 from line_fakes import LineRecorder
 from messages import HELP_TOPIC_TEXT, format_already_deleted, format_undo_button_expired
@@ -231,7 +235,7 @@ def test_legacy_row_without_messages_replays_text(bot):
         session.add(ProcessedWebhookEvent(webhook_event_id="old", response_text="ข้อความเก่า", reply_sent=False))
         session.commit()
     assert _post(client, text("old", "ข้าว 50")).status_code == 200
-    assert line.messages[-1] == [{"type": "text", "text": "ข้อความเก่า"}]
+    assert line.messages[-1] == [{"type": "text", "text": "ข้อความเก่า", "quickReply": {"items": list(help_quick_reply())}}]
     assert _only_tx(engine) == []
 
 
@@ -259,3 +263,68 @@ def test_loading_failure_does_not_block_reply(bot, monkeypatch):
     monkeypatch.setattr(app_module, "start_loading", broken)
     assert _post(client, text("e1", "ข้าว 50")).status_code == 200
     assert line.messages and len(_only_tx(engine)) == 1
+
+
+def _help_datas(message) -> list[str]:
+    return [i["action"].get("data") for i in message.get("quickReply", {}).get("items", [])]
+
+
+HELP_DATAS = [f"a=help&t={t}" for t in ("expense", "income", "savings", "edit", "privacy", "other")]
+
+
+@pytest.mark.parametrize("message", ["ข้าว 50", "รายการล่าสุด", "สรุปเดือนนี้", "อะไรก็ไม่รู้"])
+def test_every_reply_carries_help_chips(bot, message):
+    client, _, line = bot
+    _post(client, text("e1", message))
+    assert _help_datas(_last(line)) == HELP_DATAS
+
+
+def test_postback_and_follow_replies_carry_help_chips(bot):
+    client, engine, line = bot
+    _post(client, follow("e1"))
+    assert _help_datas(_last(line)) == HELP_DATAS
+    _post(client, postback("e2", "a=help&t=savings"))
+    assert _help_datas(_last(line)) == HELP_DATAS
+    _post(client, text("e3", "ข้าว 50"))
+    _post(client, postback("e4", f"a=del&t={_only_tx(engine)[0].id}"))
+    assert _help_datas(_last(line)) == HELP_DATAS
+
+
+def test_help_chips_not_cached_for_plain_text(bot):
+    client, engine, _ = bot
+    _post(client, text("e1", "รายการล่าสุด"))
+    with Session(engine) as session:
+        assert session.get(ProcessedWebhookEvent, "e1").response_messages is None
+
+
+def _recording_sleep(monkeypatch):
+    slept = []
+
+    async def sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(app_module, "asyncio", SimpleNamespace(sleep=sleep, get_running_loop=asyncio.get_running_loop))
+    monkeypatch.setattr(app_module, "LOADING_MIN_SECONDS", 5)
+    return slept
+
+
+def test_reply_waits_so_loading_dots_are_seen(bot, monkeypatch):
+    client, _, line = bot
+    slept = _recording_sleep(monkeypatch)
+    _post(client, text("e1", "ข้าว 50"))
+    assert len(slept) == 1 and 0 < slept[0] <= 5
+    assert line.messages
+
+
+def test_no_wait_without_loading_indicator(bot, monkeypatch):
+    client, _, line = bot
+    slept = _recording_sleep(monkeypatch)
+    _post(client, follow("e1"))
+    assert slept == []
+
+    async def broken(*args, **kwargs):
+        raise LineTransportError("no loading")
+
+    monkeypatch.setattr(app_module, "start_loading", broken)
+    _post(client, text("e2", "ข้าว 50"))
+    assert slept == []

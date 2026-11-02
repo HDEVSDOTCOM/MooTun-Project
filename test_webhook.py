@@ -10,7 +10,7 @@ from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import Session
 
 import app as app_module
-from line_fakes import LineRecorder, visible_text
+from line_fakes import LineRecorder, text_sender, visible_text
 from database import configure_database
 from line_api import LineTransportError
 from messages import (
@@ -191,11 +191,7 @@ def test_reply_failure_returns_502_and_redelivery_retries_saved_response(
         if len(attempts) == 1:
             raise LineTransportError("temporary failure")
 
-    async def fail_once_messages(reply_token, messages, token):
-        await fail_once(reply_token, visible_text(messages), token)
-
-    monkeypatch.setattr(app_module, "reply_text", fail_once)
-    monkeypatch.setattr(app_module, "reply_messages", fail_once_messages)
+    monkeypatch.setattr(app_module, "reply_messages", text_sender(fail_once))
     body, headers = _signed_body(
         {"events": [_text_event("evt-retry", "U-alice", "จ่าย 75 อาหาร")]}
     )
@@ -471,7 +467,6 @@ def test_edit_latest_redelivery_does_not_edit_intervening_latest(
     body, headers = _signed_body(
         {"events": [_text_event("evt-edit-idem", "U-alice", "แก้ ข้าวมันไก่ 120")]}
     )
-    original_reply = app_module.reply_text
     original_messages = app_module.reply_messages
     attempted_responses = []
 
@@ -479,13 +474,8 @@ def test_edit_latest_redelivery_does_not_edit_intervening_latest(
         attempted_responses.append(response_text)
         raise LineTransportError("simulated edit reply failure")
 
-    async def fail_edit_messages(reply_token, messages, token):
-        await fail_edit_reply(reply_token, visible_text(messages), token)
-
-    monkeypatch.setattr(app_module, "reply_text", fail_edit_reply)
-    monkeypatch.setattr(app_module, "reply_messages", fail_edit_messages)
+    monkeypatch.setattr(app_module, "reply_messages", text_sender(fail_edit_reply))
     assert client.post("/webhook", content=body, headers=headers).status_code == 502
-    monkeypatch.setattr(app_module, "reply_text", original_reply)
     monkeypatch.setattr(app_module, "reply_messages", original_messages)
 
     assert _post_text(client, "evt-new-latest", "U-alice", "BTS 47").status_code == 200
@@ -899,7 +889,7 @@ def test_pending_action_lazy_expiry_occ_loser_is_cached_and_not_reinterpreted(
         if len(attempts) == 1:
             raise LineTransportError("simulated reply failure")
 
-    monkeypatch.setattr(app_module, "reply_text", fail_first_reply)
+    monkeypatch.setattr(app_module, "reply_messages", text_sender(fail_first_reply))
     assert _post_text(client, "evt-action-expiry-loser", "U-alice", control).status_code == 502
     retry_reply = app_module.PENDING_ACTION_RETRY_REPLY
     assert attempts == [retry_reply]
@@ -1158,7 +1148,7 @@ def test_lazy_expiry_occ_loser_does_not_reinterpret_against_replacement(
         if len(attempts) == 1:
             raise LineTransportError("simulated reply failure")
 
-    monkeypatch.setattr(app_module, "reply_text", fail_first_reply)
+    monkeypatch.setattr(app_module, "reply_messages", text_sender(fail_first_reply))
 
     assert _post_text(client, "evt-expiry-loser", "U-alice", text).status_code == 502
     retry_reply = app_module.PENDING_ACTION_RETRY_REPLY

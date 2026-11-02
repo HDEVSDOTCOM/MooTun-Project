@@ -36,7 +36,10 @@ accepts only `a=del&t=<id>`, `a=undo&id=<hex32>`, `a=help&t=<topic>`; anything e
 (including the rich menu's `richmenu=…`) is claimed with no reply. Card ✕ calls
 `repository.delete_transaction_with_undo` (supersedes any pending action, keeps the
 draft). Card replies are cached as JSON in `processed_webhook_events.response_messages`
-for redelivery; plain text still replays from `response_text`. Artwork: owner PNGs in
+for redelivery; plain text still replays from `response_text`. At send time
+`_with_help_chips` adds the Help quick replies to any reply without its own chips, and a
+reply that started the loading indicator waits until `LOADING_MIN_SECONDS` have passed
+(conftest sets it to 0). Artwork: owner PNGs in
 `media/` named `pig-<record|edit|delete|restore>.<8 hex>.png`, served at `/media/`,
 URLs built from `RENDER_EXTERNAL_URL`; cards omit the image when missing. Tests use
 `line_fakes.LineRecorder` to capture `reply_text`/`reply_messages`/`start_loading`.
