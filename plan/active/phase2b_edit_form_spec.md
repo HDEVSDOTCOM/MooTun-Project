@@ -91,9 +91,9 @@ API contract:
 - `DELETE` → 204.
 - `GET /api/me/categories` → `{"expense": [...], "income": [...]}`.
 - Not found and "belongs to someone else" both return the same 404
-  `{"error": "NOT_FOUND"}`.
-- 422 body: `{"error": "INVALID", "field": "<name>"}` so the form can place the
-  message.
+  `{"code": "NOT_FOUND", "message": ...}` (the existing error shape).
+- 422 body: `{"code": "INVALID_FIELD", "message": ..., "field": "<name>"}` so the
+  form can place the message.
 - Auth is the existing Bearer LIFF ID token (no cookies, so no CSRF surface).
   Query strings on the new routes are rejected like the existing allowlist does.
 
