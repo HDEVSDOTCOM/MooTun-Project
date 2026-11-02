@@ -11,7 +11,9 @@ import httpx
 
 
 LINE_REPLY_ENDPOINT: Final = "https://api.line.me/v2/bot/message/reply"
+LINE_LOADING_ENDPOINT: Final = "https://api.line.me/v2/bot/chat/loading/start"
 LINE_TEXT_LIMIT: Final = 5_000
+LINE_MESSAGES_PER_REPLY: Final = 5
 
 
 class LineAPIError(RuntimeError):
@@ -94,14 +96,76 @@ async def reply_text(
         raise LinePayloadError(
             f"LINE reply text exceeds the {LINE_TEXT_LIMIT}-character limit"
         )
+    await reply_messages(
+        reply_token,
+        [{"type": "text", "text": text}],
+        channel_access_token,
+        client=client,
+        timeout=timeout,
+    )
 
+
+async def reply_messages(
+    reply_token: str,
+    messages: list[dict],
+    channel_access_token: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+    timeout: float = 10.0,
+) -> None:
+    """Reply with 1-5 prepared LINE message objects (text, Flex, quick replies)."""
+
+    if not channel_access_token:
+        raise LineConfigurationError("LINE channel access token is not configured")
+    if not reply_token:
+        raise LinePayloadError("LINE reply token is required")
+    if not isinstance(messages, list) or not 1 <= len(messages) <= LINE_MESSAGES_PER_REPLY:
+        raise LinePayloadError(f"LINE reply needs 1-{LINE_MESSAGES_PER_REPLY} messages")
+    if not all(isinstance(message, dict) and isinstance(message.get("type"), str) for message in messages):
+        raise LinePayloadError("LINE reply messages must be objects with a type")
+    await _post(
+        LINE_REPLY_ENDPOINT,
+        {"replyToken": reply_token, "messages": messages},
+        channel_access_token,
+        client=client,
+        timeout=timeout,
+    )
+
+
+async def start_loading(
+    user_id: str,
+    channel_access_token: str,
+    *,
+    seconds: int = 5,
+    client: httpx.AsyncClient | None = None,
+    timeout: float = 2.0,
+) -> None:
+    """Show LINE's "..." loading indicator in a one-to-one chat."""
+
+    if not channel_access_token:
+        raise LineConfigurationError("LINE channel access token is not configured")
+    if not user_id:
+        raise LinePayloadError("LINE user id is required")
+    await _post(
+        LINE_LOADING_ENDPOINT,
+        {"chatId": user_id, "loadingSeconds": seconds},
+        channel_access_token,
+        client=client,
+        timeout=timeout,
+    )
+
+
+async def _post(
+    url: str,
+    payload: dict,
+    channel_access_token: str,
+    *,
+    client: httpx.AsyncClient | None,
+    timeout: float,
+) -> None:
     headers = {
         "Authorization": f"Bearer {channel_access_token}",
         "Content-Type": "application/json",
-    }
-    payload = {
-        "replyToken": reply_token,
-        "messages": [{"type": "text", "text": text}],
     }
 
     owns_client = client is None
@@ -109,7 +173,7 @@ async def reply_text(
     try:
         try:
             response = await active_client.post(
-                LINE_REPLY_ENDPOINT,
+                url,
                 headers=headers,
                 json=payload,
             )
