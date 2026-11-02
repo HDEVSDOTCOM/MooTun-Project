@@ -364,7 +364,9 @@ def _apply_edit(owner: str, tx_id: int, raw: bytes) -> dict:
             current = get_transaction(owner, tx_id, session=session)
             if current is None:
                 raise WebAppError(404, "NOT_FOUND")
-            fields = parse_edit_body(raw, today=today, current_category=current.category)
+            fields = parse_edit_body(
+                raw, today=today, current_type=current.transaction_type, current_category=current.category,
+            )
             item = update_transaction(
                 owner, tx_id,
                 transaction_type=fields.transaction_type, amount=fields.amount_baht,
@@ -385,13 +387,23 @@ def _apply_delete(owner: str, tx_id: int) -> None:
         raise WebAppError(503, "DATA_UNAVAILABLE") from None
 
 
-@router.patch("/api/me/transactions/{tx_id:int}")
-async def edit_transaction(tx_id: int, owner: Owner, request: Request):
-    target = _tx_id(tx_id)
+async def _read_body(request: Request) -> bytes:
+    # Count while streaming: a chunked request has no Content-Length to check up front.
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
         raise WebAppError(422, "INVALID_FIELD", "body")
-    raw = await request.body()
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > MAX_BODY_BYTES:
+            raise WebAppError(422, "INVALID_FIELD", "body")
+    return bytes(raw)
+
+
+@router.patch("/api/me/transactions/{tx_id:int}")
+async def edit_transaction(tx_id: int, owner: Owner, request: Request):
+    target = _tx_id(tx_id)
+    raw = await _read_body(request)
     return await run_in_threadpool(_apply_edit, owner, target, raw)
 
 

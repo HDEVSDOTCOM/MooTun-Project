@@ -33,7 +33,7 @@ def _invalid(field: str) -> WebAppError:
     return WebAppError(422, "INVALID_FIELD", field)
 
 
-def parse_edit_body(raw: bytes, *, today: date, current_category: str) -> EditFields:
+def parse_edit_body(raw: bytes, *, today: date, current_type: str, current_category: str) -> EditFields:
     """Strictly validate one edit; raise 422 naming the first bad field."""
 
     if len(raw) > MAX_BODY_BYTES:
@@ -57,8 +57,8 @@ def parse_edit_body(raw: bytes, *, today: date, current_category: str) -> EditFi
     if not isinstance(category, str):
         raise _invalid("category")
     category = category.strip()
-    # The row's own category stays valid so legacy rows can be saved unchanged.
-    if category not in categories(kind) and category != current_category:
+    # The row's own category stays valid for its own type, so legacy rows save unchanged.
+    if category not in categories(kind) and (kind, category) != (current_type, current_category):
         raise _invalid("category")
 
     description = body["description"]
