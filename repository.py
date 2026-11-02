@@ -69,6 +69,11 @@ class RestoreOutcome(str, Enum):
     ID_COLLISION = "id_collision"
 
 
+class DeleteOutcome(str, Enum):
+    DELETED = "deleted"
+    NOT_FOUND = "not_found"
+
+
 @dataclass(frozen=True)
 class PendingActionResult:
     state: PendingActionState
@@ -80,6 +85,13 @@ class PendingActionResult:
 class RestoreResult:
     outcome: RestoreOutcome
     transaction: Transaction | None = None
+
+
+@dataclass(frozen=True)
+class DeleteWithUndoResult:
+    outcome: DeleteOutcome
+    transaction: Transaction | None = None
+    action_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1311,6 +1323,131 @@ def restore_deleted_transaction(
         return RestoreResult(RestoreOutcome.RESTORED, restored)
 
 
+def get_transaction(
+    line_user_id: str,
+    transaction_id: int,
+    *,
+    session: Session | None = None,
+) -> Transaction | None:
+    user_id = _validate_user_id(line_user_id)
+    with _session_context(session) as db:
+        return db.scalar(
+            select(Transaction).where(
+                Transaction.id == transaction_id,
+                Transaction.line_user_id == user_id,
+            )
+        )
+
+
+def category_month_total(
+    line_user_id: str,
+    transaction_type: str,
+    category: str,
+    year: int,
+    month: int,
+    *,
+    session: Session | None = None,
+) -> tuple[int, int]:
+    """Return (this category's satang, all satang of this type) for one month."""
+
+    user_id = _validate_user_id(line_user_id)
+    _validate_transaction_type(transaction_type)
+    start, end = _month_bounds(year, month)
+    with _session_context(session) as db:
+        rows = db.execute(
+            select(Transaction.category, func.coalesce(func.sum(Transaction.amount_satang), 0))
+            .where(
+                Transaction.line_user_id == user_id,
+                Transaction.transaction_type == transaction_type,
+                Transaction.occurred_on >= start,
+                Transaction.occurred_on <= end,
+            )
+            .group_by(Transaction.category)
+        ).all()
+    totals = {row[0]: int(row[1]) for row in rows}
+    return totals.get(category, 0), sum(totals.values())
+
+
+def _read_any_pending_action(user_id: str, session: Session) -> PendingAction | None:
+    """Current pending action regardless of expiry (seam for concurrency tests)."""
+
+    return session.get(PendingAction, user_id)
+
+
+def delete_transaction_with_undo(
+    line_user_id: str,
+    transaction_id: int,
+    *,
+    now: datetime | None = None,
+    session: Session | None = None,
+) -> DeleteWithUndoResult:
+    """Delete one exact transaction and open a fresh undo window in one transaction.
+
+    Any existing pending action is superseded (removed by its exact identity and
+    version); the pending transaction draft is left untouched.
+    """
+
+    user_id = _validate_user_id(line_user_id)
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+
+    with _session_context(session) as db:
+        item = db.scalar(
+            select(Transaction).where(
+                Transaction.id == transaction_id,
+                Transaction.line_user_id == user_id,
+            )
+        )
+        if item is None:
+            return DeleteWithUndoResult(DeleteOutcome.NOT_FOUND)
+
+        existing = _read_any_pending_action(user_id, db)
+        if existing is not None:
+            result = db.execute(
+                delete(PendingAction)
+                .where(
+                    PendingAction.line_user_id == user_id,
+                    PendingAction.action_id == existing.action_id,
+                    PendingAction.version == existing.version,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            db.flush()
+            if result.rowcount == 0:
+                raise PendingActionConflictError("pending action changed during delete")
+            db.expunge(existing)
+
+        action_id = uuid4().hex
+        try:
+            with db.begin_nested():
+                db.execute(
+                    insert(PendingAction).values(
+                        line_user_id=user_id,
+                        action_id=action_id,
+                        version=1,
+                        action_type="undo_delete",
+                        target_transaction_id=item.id,
+                        created_at=current_time,
+                        expires_at=current_time + UNDO_DELETE_TTL,
+                        snapshot_transaction_id=item.id,
+                        snapshot_transaction_type=item.transaction_type,
+                        snapshot_amount_satang=item.amount_satang,
+                        snapshot_category=item.category,
+                        snapshot_description=item.description,
+                        snapshot_occurred_on=item.occurred_on,
+                        snapshot_created_at=item.created_at,
+                    )
+                )
+                db.flush()
+        except IntegrityError as exc:
+            raise PendingActionConflictError("pending action created concurrently") from exc
+
+        db.delete(item)
+        db.flush()
+        return DeleteWithUndoResult(DeleteOutcome.DELETED, item, action_id)
+
+
 def get_latest_transaction(
     line_user_id: str, *, session: Session | None = None
 ) -> Transaction | None:
@@ -1382,6 +1519,7 @@ def set_webhook_response(
     webhook_event_id: str,
     response_text: str,
     *,
+    messages_json: str | None = None,
     session: Session | None = None,
 ) -> ProcessedWebhookEvent:
     text = response_text.strip()
@@ -1392,6 +1530,7 @@ def set_webhook_response(
         if event is None:
             raise LookupError("webhook event not found")
         event.response_text = text
+        event.response_messages = messages_json
         db.flush()
         return event
 
