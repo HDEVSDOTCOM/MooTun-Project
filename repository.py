@@ -1339,6 +1339,72 @@ def get_transaction(
         )
 
 
+def _drop_confirm_delete_for(user_id: str, transaction_id: int, db: Session) -> None:
+    """A pending "ลบล่าสุด" must not act on a row that changed or no longer exists."""
+
+    action = db.get(PendingAction, user_id)
+    if (
+        action is not None
+        and action.action_type == "confirm_delete"
+        and action.target_transaction_id == transaction_id
+    ):
+        db.delete(action)
+
+
+def update_transaction(
+    line_user_id: str,
+    transaction_id: int,
+    *,
+    transaction_type: str,
+    amount: MoneyInput,
+    category: str,
+    description: str | None,
+    occurred_on: date,
+    session: Session | None = None,
+) -> Transaction | None:
+    """Replace every editable field of one of the user's transactions by id."""
+
+    user_id = _validate_user_id(line_user_id)
+    kind = transaction_type.strip().lower()
+    if kind not in {"income", "expense"}:
+        raise ValueError("transaction_type must be 'income' or 'expense'")
+    amount_satang = baht_to_satang(amount)
+    category_value = category.strip()
+    if not category_value:
+        raise ValueError("category is required")
+    with _session_context(session) as db:
+        item = get_transaction(user_id, transaction_id, session=db)
+        if item is None:
+            return None
+        item.transaction_type = kind
+        item.amount_satang = amount_satang
+        item.category = category_value
+        item.description = description.strip() if description and description.strip() else None
+        item.occurred_on = occurred_on
+        _drop_confirm_delete_for(user_id, transaction_id, db)
+        db.flush()
+        return item
+
+
+def delete_transaction_by_id(
+    line_user_id: str,
+    transaction_id: int,
+    *,
+    session: Session | None = None,
+) -> bool:
+    """Delete one of the user's transactions by id; False when it is not theirs or gone."""
+
+    user_id = _validate_user_id(line_user_id)
+    with _session_context(session) as db:
+        item = get_transaction(user_id, transaction_id, session=db)
+        if item is None:
+            return False
+        db.delete(item)
+        _drop_confirm_delete_for(user_id, transaction_id, db)
+        db.flush()
+        return True
+
+
 def category_month_total(
     line_user_id: str,
     transaction_type: str,
