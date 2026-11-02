@@ -18,6 +18,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -203,4 +204,6 @@ class ProcessedWebhookEvent(Base):
         DateTime(timezone=True), nullable=False, default=utc_now
     )
     response_text: Mapped[str | None] = mapped_column(String(5000), nullable=True)
+    # JSON list of the exact LINE messages sent, so redelivery replays cards too.
+    response_messages: Mapped[str | None] = mapped_column(Text, nullable=True)
     reply_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

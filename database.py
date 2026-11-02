@@ -74,6 +74,8 @@ def _upgrade_webhook_event_table(db_engine: Engine) -> None:
         statements.append(
             f"ALTER TABLE {table_name} ADD COLUMN reply_sent BOOLEAN NOT NULL DEFAULT FALSE"
         )
+    if "response_messages" not in columns:
+        statements.append(f"ALTER TABLE {table_name} ADD COLUMN response_messages TEXT")
     if statements:
         with db_engine.begin() as connection:
             for statement in statements:
