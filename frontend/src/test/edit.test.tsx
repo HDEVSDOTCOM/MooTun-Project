@@ -115,11 +115,22 @@ describe("EditSheet", () => {
     expect(state.send).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "ลบรายการนี้" }));
+    act(() => vi.advanceTimersByTime(500));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "แตะอีกครั้งเพื่อลบ" }));
     });
     expect(state.send).toHaveBeenCalledWith("DELETE", "/api/me/transactions/7", "tok", undefined);
     expect(screen.getByRole("status").textContent).toContain("ลบแล้ว");
+  });
+
+  it("ignores an accidental double tap on delete", () => {
+    vi.useFakeTimers();
+    renderSheet();
+    fireEvent.click(screen.getByRole("button", { name: "ลบรายการนี้" }));
+    act(() => vi.advanceTimersByTime(100));
+    fireEvent.click(screen.getByRole("button", { name: "แตะอีกครั้งเพื่อลบ" }));
+    expect(state.send).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "แตะอีกครั้งเพื่อลบ" })).toBeTruthy();
   });
 
   it("explains a transaction that no longer exists", () => {

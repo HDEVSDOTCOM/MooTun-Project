@@ -13,6 +13,8 @@ const KINDS: { value: Kind; label: string }[] = [
 const FIELD_HINT = "ตรวจช่องนี้อีกครั้ง";
 const DONE_MS = 800;
 const ARM_MS = 3000;
+// A second touch this soon after arming is a double tap, not a confirmation.
+const CONFIRM_AFTER_MS = 400;
 
 export function bangkokToday(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(now);
@@ -135,11 +137,16 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
   const [field, setField] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [armed, setArmed] = useState(false);
+  const armedAt = useRef(0);
+  const armTimer = useRef<number | undefined>(undefined);
   const [done, setDone] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
   const ids = { amount: useId(), category: useId(), description: useId(), date: useId() };
 
-  useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
+  useEffect(() => () => {
+    timers.current.forEach((timer) => window.clearTimeout(timer));
+    window.clearTimeout(armTimer.current);
+  }, []);
 
   const later = (callback: () => void, ms: number) => {
     timers.current.push(window.setTimeout(callback, ms));
@@ -192,9 +199,12 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
   const remove = () => {
     if (!armed) {
       setArmed(true);
-      later(() => setArmed(false), ARM_MS);
+      armedAt.current = Date.now();
+      window.clearTimeout(armTimer.current);
+      armTimer.current = window.setTimeout(() => setArmed(false), ARM_MS);
       return;
     }
+    if (Date.now() - armedAt.current < CONFIRM_AFTER_MS) return;
     void run("DELETE", "ลบแล้ว");
   };
 

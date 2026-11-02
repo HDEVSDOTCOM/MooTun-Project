@@ -84,6 +84,7 @@ def test_other_user_and_missing_ids_are_identical_404(web):
     ({"amount_baht": "1e3"}, "amount_baht"),
     ({"category": "ไม่มีหมวดนี้"}, "category"),
     ({"category": "อาหาร"}, "category"),  # expense category on an income row
+    ({"category": "อาหาร A"}, "category"),  # the row's own expense category is not valid for income
     ({"description": "ก" * 501}, "description"),
     ({"description": 5}, "description"),
     ({"occurred_on": "2026-10-11"}, "occurred_on"),
@@ -164,3 +165,22 @@ def test_shell_serves_transactions_with_edit_query(web):
     client, _, _ = web
     response = client.get("/app/transactions?edit=5")
     assert response.status_code == 200 and "<!doctype html>" in response.text
+
+
+def test_body_read_stops_at_the_cap_without_content_length():
+    import asyncio
+    from starlette.requests import Request
+    from webapp_auth import WebAppError
+    from webapp_edit import MAX_BODY_BYTES
+
+    pulled = []
+
+    async def receive():
+        pulled.append(1)
+        return {"type": "http.request", "body": b"x" * 1024, "more_body": len(pulled) < 1000}
+
+    request = Request({"type": "http", "method": "PATCH", "headers": []}, receive)
+    with pytest.raises(WebAppError) as caught:
+        asyncio.run(routes._read_body(request))
+    assert (caught.value.status_code, caught.value.field) == (422, "body")
+    assert len(pulled) <= MAX_BODY_BYTES // 1024 + 1
