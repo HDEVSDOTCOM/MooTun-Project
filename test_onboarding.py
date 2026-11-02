@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import app as app_module
-from line_fakes import LineRecorder
+from line_fakes import LineRecorder, text_sender
 import parser as parser_module
 from database import configure_database
 from line_api import LINE_TEXT_LIMIT, LineTransportError
@@ -346,7 +346,7 @@ def test_reply_failure_retries_exact_cached_text_without_regeneration(onboarding
         if len(attempts) == 1:
             raise LineTransportError("temporary failure")
 
-    monkeypatch.setattr(app_module, "reply_text", fail_once)
+    monkeypatch.setattr(app_module, "reply_messages", text_sender(fail_once))
     item = _onboarding_event(trigger, "retry")
     assert _post_event(client, item).status_code == 502
     with Session(engine) as session:

@@ -10,6 +10,15 @@ def visible_text(messages: list[dict]) -> str:
     return last.get("altText") or last.get("text", "")
 
 
+def text_sender(send_text):
+    """Adapt a ``(reply_token, text, token)`` fake into a ``reply_messages`` stand-in."""
+
+    async def send(reply_token: str, messages: list[dict], token: str) -> None:
+        await send_text(reply_token, visible_text(messages), token)
+
+    return send
+
+
 class LineRecorder:
     """Records every reply as ``(reply_token, visible_text, access_token)``.
 
@@ -43,7 +52,7 @@ class LineRecorder:
         self.loading.append(user_id)
 
     def install(self, monkeypatch, app_module) -> "LineRecorder":
-        monkeypatch.setattr(app_module, "reply_text", self.reply_text)
+        monkeypatch.setattr(app_module, "reply_text", self.reply_text, raising=False)
         monkeypatch.setattr(app_module, "reply_messages", self.reply_messages, raising=False)
         monkeypatch.setattr(app_module, "start_loading", self.start_loading, raising=False)
         return self

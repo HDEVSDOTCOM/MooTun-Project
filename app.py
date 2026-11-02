@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import asyncio
 import json
 import logging
 import os
@@ -32,7 +33,6 @@ from flex import (
 from line_api import (
     LineAPIError,
     reply_messages,
-    reply_text,
     start_loading,
     verify_webhook_signature,
 )
@@ -147,6 +147,7 @@ PENDING_ACTION_RETRY_REPLY = "มีอีกข้อความเข้า�
 PENDING_ACTION_EXPIRED_REPLY = 'คำสั่งลบหมดเวลาแล้ว ถ้ายังอยากลบ พิมพ์ "ลบล่าสุด" อีกครั้งครับ'
 
 load_dotenv()
+LOADING_MIN_SECONDS = 0.8
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 
@@ -846,13 +847,20 @@ async def readiness_check() -> dict[str, str]:
     return {"status": "ready"}
 
 
-async def _send_reply(reply_token: str, messages: list[dict]) -> None:
-    """Plain single text goes through reply_text; cards and quick replies use reply_messages."""
+def _with_help_chips(messages: list[dict]) -> list[dict]:
+    """Keep Help topics one tap away: add them unless the reply has its own chips.
 
-    if len(messages) == 1 and messages[0].get("type") == "text" and "quickReply" not in messages[0]:
-        await reply_text(reply_token, messages[0]["text"], LINE_CHANNEL_ACCESS_TOKEN)
-    else:
-        await reply_messages(reply_token, messages, LINE_CHANNEL_ACCESS_TOKEN)
+    Applied at send time, so cached replies (including pre-chip rows) get them too.
+    """
+
+    if any("quickReply" in message for message in messages):
+        return messages
+    *head, last = messages
+    return [*head, {**last, "quickReply": {"items": list(help_quick_reply())}}]
+
+
+async def _send_reply(reply_token: str, messages: list[dict]) -> None:
+    await reply_messages(reply_token, messages, LINE_CHANNEL_ACCESS_TOKEN)
 
 
 def handle_postback(
@@ -957,6 +965,7 @@ async def line_webhook(
         ):
             continue
         postback_command: PostbackCommand | None = None
+        loading_started: float | None = None
         if event_type == "postback":
             postback = event.get("postback")
             postback_data = postback.get("data") if isinstance(postback, dict) else None
@@ -972,6 +981,7 @@ async def line_webhook(
             if not already_seen:
                 try:
                     await start_loading(source["userId"], LINE_CHANNEL_ACCESS_TOKEN)
+                    loading_started = asyncio.get_running_loop().time()
                 except Exception as exc:  # noqa: BLE001 - cosmetic call, never fatal
                     logger.warning("LINE loading indicator failed: %s", type(exc).__name__)
 
@@ -1021,7 +1031,12 @@ async def line_webhook(
 
         if isinstance(reply_token, str) and reply_token:
             try:
-                await _send_reply(reply_token, messages)
+                if loading_started is not None:
+                    # Let "..." be seen even when the answer is instant.
+                    remaining = LOADING_MIN_SECONDS - (asyncio.get_running_loop().time() - loading_started)
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+                await _send_reply(reply_token, _with_help_chips(messages))
             except LineAPIError as exc:
                 logger.error("LINE reply failed for event %s: %s", event_id, type(exc).__name__)
                 raise HTTPException(status_code=502, detail="LINE reply failed") from exc

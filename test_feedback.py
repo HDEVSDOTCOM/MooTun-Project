@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import app as app_module
-from line_fakes import LineRecorder
+from line_fakes import LineRecorder, text_sender
 from database import configure_database, init_db
 from line_api import LineTransportError
 from messages import (
@@ -610,7 +610,7 @@ def test_unsent_cached_feedback_reply_retries_without_inserting_again(feedback_c
         if len(attempts) == 1:
             raise LineTransportError("temporary failure")
 
-    monkeypatch.setattr(app_module, "reply_text", fail_once)
+    monkeypatch.setattr(app_module, "reply_messages", text_sender(fail_once))
     assert _post_text(client, "feedback", USER, "เสนอแนะ 5").status_code == 502
     with Session(engine) as session:
         assert _count(session) == 1
