@@ -101,6 +101,19 @@ npm run build --prefix frontend    # สร้างไฟล์ไว้ที�
 การล็อกอิน LINE ต้องเปิดผ่าน LIFF URL ที่ชี้มายัง HTTPS (เช่น tunnel) ตั้ง `WEBAPP_ENABLED=true`,
 `MINIAPP_DEVELOPING_LIFF_ID` และ `MINIAPP_DEVELOPING_CHANNEL_ID` ใน `.env`
 
+## การ์ดในแชตและรูปหมู
+
+บอทตอบการจด แก้ ลบ และเอาคืนเป็นการ์ด (Flex Message) ส่วนเมนู Help และคำถามที่รอคำตอบมีปุ่ม Quick Reply
+ถ้าจะใส่รูปหมูบนหัวการ์ด ให้วางไฟล์ PNG พื้นใสในโฟลเดอร์ `media/` ตั้งชื่อตามนี้ (เลข 8 หลักเป็นตัวอักษร 0-9 a-f อะไรก็ได้
+แต่ต้องเปลี่ยนทุกครั้งที่แก้รูป เพราะ LINE จำรูปเดิมไว้)
+
+- `pig-record.<8 hex>.png` จดแล้ว
+- `pig-edit.<8 hex>.png` แก้แล้ว
+- `pig-delete.<8 hex>.png` ลบแล้ว
+- `pig-restore.<8 hex>.png` เอาคืน (ไม่มีก็ได้ จะใช้รูปจดแล้วแทน)
+
+ขนาดแนะนำไม่เกิน 1024px และไม่เกิน 300 KB ถ้ายังไม่มีรูป การ์ดจะแสดงแบบไม่มีรูป
+
 ## Rich menu
 
 เมนู 2 หน้าใต้แชต ตั้งค่าใน `richmenu_config.py` รูปอยู่ที่ `richmenu/page1.jpg`, `richmenu/page2.jpg`
