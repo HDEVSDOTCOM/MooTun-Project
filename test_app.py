@@ -4,9 +4,15 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app import handle_text_message
+import app
 from models import Base
+from replies import as_reply
 from repository import list_recent_transactions, monthly_summary
+
+
+def handle_text_message(*args):
+    """The reply text (card replies carry it as altText)."""
+    return as_reply(app.handle_text_message(*args)).text
 
 
 @pytest.fixture()

@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import Session
 
 import app as app_module
+from line_fakes import LineRecorder, visible_text
 from database import configure_database
 from line_api import LineTransportError
 from messages import (
@@ -88,12 +89,9 @@ def webhook_client(tmp_path, monkeypatch):
     engine = configure_database(f"sqlite:///{tmp_path / 'webhook-test.db'}")
     replies: list[tuple[str, str, str]] = []
 
-    async def fake_reply(reply_token: str, text: str, token: str) -> None:
-        replies.append((reply_token, text, token))
-
     monkeypatch.setattr(app_module, "LINE_CHANNEL_SECRET", SECRET)
     monkeypatch.setattr(app_module, "LINE_CHANNEL_ACCESS_TOKEN", "test-access-token")
-    monkeypatch.setattr(app_module, "reply_text", fake_reply)
+    LineRecorder(replies).install(monkeypatch, app_module)
 
     with TestClient(app_module.app) as client:
         yield client, engine, replies
@@ -193,7 +191,11 @@ def test_reply_failure_returns_502_and_redelivery_retries_saved_response(
         if len(attempts) == 1:
             raise LineTransportError("temporary failure")
 
+    async def fail_once_messages(reply_token, messages, token):
+        await fail_once(reply_token, visible_text(messages), token)
+
     monkeypatch.setattr(app_module, "reply_text", fail_once)
+    monkeypatch.setattr(app_module, "reply_messages", fail_once_messages)
     body, headers = _signed_body(
         {"events": [_text_event("evt-retry", "U-alice", "จ่าย 75 อาหาร")]}
     )
@@ -470,15 +472,21 @@ def test_edit_latest_redelivery_does_not_edit_intervening_latest(
         {"events": [_text_event("evt-edit-idem", "U-alice", "แก้ ข้าวมันไก่ 120")]}
     )
     original_reply = app_module.reply_text
+    original_messages = app_module.reply_messages
     attempted_responses = []
 
     async def fail_edit_reply(reply_token, response_text, token):
         attempted_responses.append(response_text)
         raise LineTransportError("simulated edit reply failure")
 
+    async def fail_edit_messages(reply_token, messages, token):
+        await fail_edit_reply(reply_token, visible_text(messages), token)
+
     monkeypatch.setattr(app_module, "reply_text", fail_edit_reply)
+    monkeypatch.setattr(app_module, "reply_messages", fail_edit_messages)
     assert client.post("/webhook", content=body, headers=headers).status_code == 502
     monkeypatch.setattr(app_module, "reply_text", original_reply)
+    monkeypatch.setattr(app_module, "reply_messages", original_messages)
 
     assert _post_text(client, "evt-new-latest", "U-alice", "BTS 47").status_code == 200
     assert client.post("/webhook", content=body, headers=headers).status_code == 200
