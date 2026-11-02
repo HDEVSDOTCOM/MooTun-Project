@@ -25,9 +25,15 @@ hold the SQLAlchemy engine and tables.
 
 Mini App: `webapp_auth.py` verifies the LIFF ID token on every `/api/me/*` request
 (per-route query allowlists via `owner_with_query`); `webapp_routes.py` serves the
-read-only APIs, the SPA shell for `/app/` and the tab paths in `SPA_TABS`, and hashed
+APIs, the SPA shell for `/app/` and the tab paths in `SPA_TABS`, and hashed
 files from `webapp/dist/assets`. Pytest uses a stand-in dist (see the `web` fixture),
 so backend tests never need a frontend build.
+Reads use `ReadOnlySession` (SELECT-only guard). The only writes are the edit form's
+`PATCH`/`DELETE /api/me/transactions/{id:int}`: body validated by `webapp_edit.py`
+(amount must be a JSON string, category from `taxonomy.categories()` or the row's own),
+committed via `database.session_scope()`; other users' and missing ids give the same 404.
+Editing or deleting a row drops a pending `confirm_delete` on it. ✏️ on chat cards opens
+`/transactions?edit=<id>`, which `Transactions.tsx` turns into `components/EditSheet.tsx`.
 
 Chat cards: `handle_text_message`/`handle_postback` return `str | Reply` (`replies.py`:
 text = altText, optional Flex card and quick replies). `flex.py` builds cards (pure JSON;
