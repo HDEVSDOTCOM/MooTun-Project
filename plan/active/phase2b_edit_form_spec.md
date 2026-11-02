@@ -1,6 +1,6 @@
 # MooTun Mini App Edit Form (Phase 2A, part B) — Design Spec
 
-**Status:** `DRAFT — awaiting owner review`
+**Status:** `APPROVED — implemented` (owner approved 2026-11-02)
 **Repository baseline:** `main` after PR #7 (always-on Help chips)
 **Follows:** `phase2a_chat_cards_spec.md` (part A, shipped)
 
