@@ -65,7 +65,7 @@ def transaction_card(
     buttons = []
     if liff_id:
         buttons.append(_icon_button("✏️", {"type": "uri", "label": "แก้ไข",
-                                          "uri": f"https://liff.line.me/{liff_id}/transactions"}))
+                                          "uri": f"https://liff.line.me/{liff_id}/transactions?edit={int(tx['id'])}"}))
     buttons.append(_icon_button("✕", {"type": "postback", "label": "ลบ", "data": f"a=del&t={int(tx['id'])}"}))
     return _bubble(variant, tx, total, image_url, amount_struck=False, buttons=buttons)
 

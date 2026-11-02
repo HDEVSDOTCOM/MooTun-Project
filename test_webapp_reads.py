@@ -45,7 +45,7 @@ def test_month_transactions_scoped_ordered_and_filtered(web):
     }
     assert [item["occurred_on"] for item in body["items"]] == ["2026-10-02", "2026-10-01"]
     assert [item["amount_baht"] for item in body["items"]] == ["20.50", "100.01"]
-    assert all("id" not in item and "line_user_id" not in item for item in body["items"])
+    assert all(isinstance(item["id"], int) and "line_user_id" not in item for item in body["items"])
 
     income = client.get("/api/me/transactions?month=2026-10&type=income", headers=headers()).json()
     assert income["type"] == "income"

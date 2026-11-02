@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import event
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,12 +21,17 @@ import database
 import media
 from repository import (
     category_totals,
+    delete_transaction_by_id,
+    get_transaction,
     get_savings_goal,
     list_month_transactions,
     list_recent_transactions,
     monthly_summary,
     monthly_totals_series,
+    update_transaction,
 )
+from taxonomy import categories
+from webapp_edit import MAX_BODY_BYTES, parse_edit_body
 from webapp_auth import (
     ERROR_MESSAGES,
     OwnerQuery,
@@ -148,6 +154,7 @@ def _month_param(query: OwnerQuery) -> tuple[int, int]:
 
 def _transaction_item(item) -> dict:
     return {
+        "id": item.id,
         "transaction_type": item.transaction_type,
         "amount_baht": money(item.amount),
         "category": item.category,
@@ -331,16 +338,84 @@ def savings(owner: Owner, session: ReadSession):
     return {"goal": result, "as_of": now.isoformat()}
 
 
+# The :int path convertor keeps "recent" and other words off these routes (405, not 404).
+MAX_TX_ID = 999_999_999
+
+
+def _tx_id(value: int) -> int:
+    # Ids fit the INTEGER column; anything larger is simply not found.
+    if not 0 < value <= MAX_TX_ID:
+        raise WebAppError(404, "NOT_FOUND")
+    return value
+
+
+@router.get("/api/me/transactions/{tx_id:int}")
+def transaction_item(tx_id: int, owner: Owner, session: ReadSession):
+    item = get_transaction(owner, _tx_id(tx_id), session=session)
+    if item is None:
+        raise WebAppError(404, "NOT_FOUND")
+    return _transaction_item(item)
+
+
+def _apply_edit(owner: str, tx_id: int, raw: bytes) -> dict:
+    today = utc_now().astimezone(BANGKOK).date()
+    try:
+        with database.session_scope() as session:
+            current = get_transaction(owner, tx_id, session=session)
+            if current is None:
+                raise WebAppError(404, "NOT_FOUND")
+            fields = parse_edit_body(raw, today=today, current_category=current.category)
+            item = update_transaction(
+                owner, tx_id,
+                transaction_type=fields.transaction_type, amount=fields.amount_baht,
+                category=fields.category, description=fields.description,
+                occurred_on=fields.occurred_on, session=session,
+            )
+            return _transaction_item(item)
+    except SQLAlchemyError:
+        raise WebAppError(503, "DATA_UNAVAILABLE") from None
+
+
+def _apply_delete(owner: str, tx_id: int) -> None:
+    try:
+        with database.session_scope() as session:
+            if not delete_transaction_by_id(owner, tx_id, session=session):
+                raise WebAppError(404, "NOT_FOUND")
+    except SQLAlchemyError:
+        raise WebAppError(503, "DATA_UNAVAILABLE") from None
+
+
+@router.patch("/api/me/transactions/{tx_id:int}")
+async def edit_transaction(tx_id: int, owner: Owner, request: Request):
+    target = _tx_id(tx_id)
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        raise WebAppError(422, "INVALID_FIELD", "body")
+    raw = await request.body()
+    return await run_in_threadpool(_apply_edit, owner, target, raw)
+
+
+@router.delete("/api/me/transactions/{tx_id:int}", status_code=204)
+async def remove_transaction(tx_id: int, owner: Owner):
+    await run_in_threadpool(_apply_delete, owner, _tx_id(tx_id))
+    return Response(status_code=204)
+
+
+@router.get("/api/me/categories")
+def category_list(owner: Owner):
+    return {"expense": list(categories("expense")), "income": list(categories("income"))}
+
+
 def register_webapp(app: FastAPI) -> None:
-    def error_response(status_code: int, code: str) -> JSONResponse:
-        return JSONResponse(
-            status_code=status_code,
-            content={"code": code, "message": ERROR_MESSAGES[code]},
-        )
+    def error_response(status_code: int, code: str, field: str | None = None) -> JSONResponse:
+        content = {"code": code, "message": ERROR_MESSAGES[code]}
+        if field is not None:
+            content["field"] = field
+        return JSONResponse(status_code=status_code, content=content)
 
     @app.exception_handler(WebAppError)
     async def web_error(request: Request, exc: WebAppError):
-        return error_response(exc.status_code, exc.code)
+        return error_response(exc.status_code, exc.code, exc.field)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
