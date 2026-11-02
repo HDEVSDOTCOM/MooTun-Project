@@ -46,7 +46,8 @@ Flex bubble, top to bottom:
 | Footer | `{category}เดือนนี้ ฿{total}` and a bar whose filled width is this category's share of the month's total for the same type, with `{pct}% ของรายจ่าย/รายรับ` (Asia/Bangkok month of `occurred_on`) |
 
 Buttons:
-- ✏️ → `uri` `https://liff.line.me/{LIFF_ID}/transactions` (part B replaces it).
+- ✏️ → `uri` `https://liff.line.me/{LIFF_ID}/transactions` (part B replaces it);
+  `LIFF_ID` is `MINIAPP_DEVELOPING_LIFF_ID`; the button is omitted when it is unset.
 - ✕ → `postback` `a=del&t={transaction_id}` (no `displayText`).
 
 Amounts use the exact decimal strings already produced by `messages.format_amount`;
@@ -91,7 +92,7 @@ Help topic replies are plain text (copy in `messages.py`, owner-reviewable):
 
 For every accepted `message`/`postback` event, before handling it, call
 `POST /v2/bot/chat/loading/start` with `{"chatId": userId, "loadingSeconds": 5}`.
-It runs concurrently with handling, has a 2-second timeout, and any error is
+It is awaited just before handling (handling is synchronous, so true concurrency buys nothing), has a 2-second timeout, and any error is
 logged at warning level and ignored. Not called for `follow` or redelivered
 events that replay a cached reply.
 
@@ -153,10 +154,9 @@ transaction gets the restore card (§2.1).
 
 Artwork files live in `media/` (committed, PNG, ≤ 1024 px, ≤ 300 KB each) with
 names `pig-<pose>.<8 hex>.png` for poses `record`, `edit`, `delete`, `restore`
-(restore may reuse `record`). `PUBLIC_BASE_URL` (new env var, e.g.
-`https://mootoon-line-bot.onrender.com`) builds absolute HTTPS URLs; when it is
-unset or a pose file is missing, cards render without the image. `.env.example`
-gets an empty placeholder.
+(restore may reuse `record`). Absolute HTTPS URLs come from the existing
+`_export_base_url()` (`RENDER_EXTERNAL_URL`, set automatically by Render); when it
+is unset or a pose file is missing, cards render without the image. No new env var.
 
 ## 4. Invariants and limits
 
@@ -192,7 +192,6 @@ gets an empty placeholder.
 ## 6. Rollout
 
 1. Merge; Render redeploys (migration adds the column on startup).
-2. Owner sets `PUBLIC_BASE_URL` in Render; artwork lands in a follow-up commit
-   when supplied (cards work without it).
+2. Artwork lands in a follow-up commit when supplied (cards work without it).
 3. Phone check: record, ✕, เอาคืน (inside and after 10 min), Help topics,
    direction quick reply, delete confirmations, "..." indicator.
