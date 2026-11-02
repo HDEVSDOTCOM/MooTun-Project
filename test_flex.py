@@ -55,7 +55,7 @@ def test_record_card_expense():
     assert pill["backgroundColor"] == "#D81B72"
     actions = _actions(card)
     assert {"type": "postback", "data": "a=del&t=7"} in [{k: a[k] for k in ("type", "data")} for a in actions if a["type"] == "postback"]
-    assert any(a.get("uri") == "https://liff.line.me/LIFF/transactions" for a in actions)
+    assert any(a.get("uri") == f"https://liff.line.me/LIFF/transactions?edit={EXPENSE['id']}" for a in actions)
 
 
 def test_income_card_is_green_and_signed_plus():

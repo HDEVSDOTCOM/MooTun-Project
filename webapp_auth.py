@@ -26,13 +26,16 @@ ERROR_MESSAGES = {
     "WEBAPP_UNAVAILABLE": "หน้าเว็บไม่พร้อมใช้งานชั่วคราว ยังใช้งานผ่านแชตได้",
     "INVALID_REQUEST": "คำขอไม่ถูกต้อง",
     "NOT_FOUND": "ไม่พบหน้าที่ต้องการ",
+    "INVALID_FIELD": "ข้อมูลไม่ถูกต้อง",
 }
 
 
 class WebAppError(Exception):
-    def __init__(self, status_code: int, code: str):
+    def __init__(self, status_code: int, code: str, field: str | None = None):
         self.status_code = status_code
         self.code = code
+        # Names the offending input on 422 so the edit form can place its message.
+        self.field = field
         super().__init__(code)
 
 

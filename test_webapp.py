@@ -314,7 +314,8 @@ def test_two_user_isolation_and_exact_summary(web):
         assert recent["items"][0]["category"] == category
         assert len(recent["items"]) == count
         assert all(item["category"].endswith("A" if token == TOKEN_A else "B") for item in recent["items"])
-        assert all("id" not in item and "line_user_id" not in item for item in recent["items"])
+        # Row ids are exposed for the edit form; owner identity never is.
+        assert all(isinstance(item["id"], int) and "line_user_id" not in item for item in recent["items"])
         assert client.get(PATHS[2], headers=headers(token)).json()["goal"]["title"] == title
 
 
@@ -392,7 +393,7 @@ def test_recent_fixed_five_full_order_and_dates(web):
         "future date", "later date", "next date", "newer created", "tie newer ID",
     ]
     for item in data["items"]:
-        assert set(item) == {"transaction_type", "amount_baht", "category", "description", "occurred_on", "created_at"}
+        assert set(item) == {"id", "transaction_type", "amount_baht", "category", "description", "occurred_on", "created_at"}
         assert item["amount_baht"] == "123.45"
         assert item["created_at"].endswith("+07:00")
     assert data["items"][1]["created_at"] == "2026-10-10T17:30:00+07:00"
