@@ -1,6 +1,6 @@
 # MooTun Chat Cards (Phase 2A, part A) — Design Spec
 
-**Status:** `DRAFT — awaiting owner review` (2026-11-02)
+**Status:** `APPROVED — implemented` (owner approved 2026-11-02)
 **Repository baseline:** `main` at `18d4172`
 **Reference:** `ref-video-and-rich-menu-line/lasted 2.11.69.mp4` (ป้านวล bot), analysed 2026-11-02.
 

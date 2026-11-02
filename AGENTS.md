@@ -29,6 +29,18 @@ read-only APIs, the SPA shell for `/app/` and the tab paths in `SPA_TABS`, and h
 files from `webapp/dist/assets`. Pytest uses a stand-in dist (see the `web` fixture),
 so backend tests never need a frontend build.
 
+Chat cards: `handle_text_message`/`handle_postback` return `str | Reply` (`replies.py`:
+text = altText, optional Flex card and quick replies). `flex.py` builds cards (pure JSON;
+visible amounts via `messages.format_amount`, satang only sizes bars). `postback.py`
+accepts only `a=del&t=<id>`, `a=undo&id=<hex32>`, `a=help&t=<topic>`; anything else
+(including the rich menu's `richmenu=…`) is claimed with no reply. Card ✕ calls
+`repository.delete_transaction_with_undo` (supersedes any pending action, keeps the
+draft). Card replies are cached as JSON in `processed_webhook_events.response_messages`
+for redelivery; plain text still replays from `response_text`. Artwork: owner PNGs in
+`media/` named `pig-<record|edit|delete|restore>.<8 hex>.png`, served at `/media/`,
+URLs built from `RENDER_EXTERNAL_URL`; cards omit the image when missing. Tests use
+`line_fakes.LineRecorder` to capture `reply_text`/`reply_messages`/`start_loading`.
+
 Rich menu (separate from the Render deploy): `richmenu_config.py` is pure data (areas,
 actions, aliases `mootoon-page1/2`); `richmenu_deploy.py` publishes it with the
 committed `richmenu/page*.jpg`. Message buttons must stay valid parser commands
