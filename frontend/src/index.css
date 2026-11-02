@@ -34,6 +34,34 @@ body {
   outline-offset: 2px;
 }
 
+::selection {
+  background: var(--color-brand-soft);
+  color: var(--color-ink);
+}
+
+input,
+select {
+  caret-color: var(--color-brand);
+  accent-color: var(--color-brand);
+}
+
+/* The edit sheet rises from the tab bar; the backdrop only fades. */
+@keyframes sheet-in {
+  from { transform: translateY(100%); }
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+}
+
+.sheet {
+  animation: sheet-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sheet-backdrop {
+  animation: backdrop-in 200ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;

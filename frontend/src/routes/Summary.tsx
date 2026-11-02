@@ -86,7 +86,7 @@ function Recent() {
       {data && data.items.length === 0 && <Empty title="ยังไม่มีรายการ" hint="จดผ่านแชตกับน้องหมูตุ๋นได้เลย" />}
       {data && data.items.length > 0 && (
         <ul className="divide-y divide-line">
-          {data.items.map((item, index) => <TransactionRow key={transactionKey(item, index)} item={item} />)}
+          {data.items.map((item) => <TransactionRow key={transactionKey(item)} item={item} />)}
         </ul>
       )}
     </Card>

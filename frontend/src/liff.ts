@@ -25,6 +25,11 @@ export function isInitialized(): boolean {
   return initialized;
 }
 
+// Back to the chat after an edit opened from a card. Outside LINE this is a no-op.
+export function closeWindow(): void {
+  if (initialized) liff.closeWindow();
+}
+
 export function idToken(): string | null {
   return liff.getIDToken();
 }
