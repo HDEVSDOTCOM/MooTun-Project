@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { MonthTransactions, TransactionItem } from "../api";
 import { MonthPicker } from "../components/MonthPicker";
+import { EditSheet } from "../components/EditSheet";
 import { TransactionRow, transactionKey } from "../components/TransactionRow";
 import { Card, Empty, InlineError, Skeleton } from "../components/ui";
 import { bangkokMonth, calendarDate, monthParam, type YearMonth } from "../money";
@@ -25,8 +27,21 @@ export function groupByDay(items: TransactionItem[]): [string, TransactionItem[]
   return groups;
 }
 
+// ✏️ on a chat card opens /transactions?edit=<id>; anything else is ignored.
+const EDIT_ID = /^[0-9]{1,9}$/;
+
+interface Editing {
+  id: number;
+  fromChat: boolean;
+}
+
 export function Transactions() {
   const { summary } = useSession();
+  const [params, setParams] = useSearchParams();
+  const [editing, setEditing] = useState<Editing | null>(() => {
+    const edit = params.get("edit");
+    return edit && EDIT_ID.test(edit) ? { id: Number(edit), fromChat: true } : null;
+  });
   const [month, setMonth] = useState<YearMonth>(() =>
     summary ? { yearCe: summary.year_ce, month: summary.month } : bangkokMonth(),
   );
@@ -67,7 +82,10 @@ export function Transactions() {
         <Card key={day}>
           <h2 className="text-sm font-medium text-muted">{calendarDate(day)}</h2>
           <ul className="divide-y divide-line">
-            {items.map((item, index) => <TransactionRow key={transactionKey(item, index)} item={item} showDate={false} />)}
+            {items.map((item) => (
+              <TransactionRow key={transactionKey(item)} item={item} showDate={false}
+                onSelect={() => setEditing({ id: item.id, fromChat: false })} />
+            ))}
           </ul>
         </Card>
       ))}
@@ -75,6 +93,13 @@ export function Transactions() {
         <p className="text-center text-sm text-muted">
           แสดง {data.limit} รายการล่าสุดของเดือน ดูทั้งหมดได้ด้วยคำสั่ง “ส่งออกข้อมูล” ในแชต
         </p>
+      )}
+      {editing && (
+        <EditSheet id={editing.id} fromChat={editing.fromChat} onChanged={retry}
+          onClose={() => {
+            setEditing(null);
+            if (params.has("edit")) setParams({}, { replace: true });
+          }} />
       )}
     </div>
   );
