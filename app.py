@@ -956,19 +956,24 @@ async def line_webhook(
             not isinstance(message, dict) or message.get("type") != "text"
         ):
             continue
-        postback_data = None
+        postback_command: PostbackCommand | None = None
         if event_type == "postback":
             postback = event.get("postback")
             postback_data = postback.get("data") if isinstance(postback, dict) else None
             if not isinstance(postback_data, str):
                 continue
+            postback_command = parse_postback(postback_data)
 
-        if event_type in ("message", "postback"):
-            # "..." while we work; a failure must never block or change the reply.
-            try:
-                await start_loading(source["userId"], LINE_CHANNEL_ACCESS_TOKEN)
-            except LineAPIError as exc:
-                logger.warning("LINE loading indicator failed: %s", type(exc).__name__)
+        # "..." only for events we will answer for the first time (not the rich
+        # menu's own postbacks, not redeliveries); a failure never blocks the reply.
+        if event_type == "message" or postback_command is not None:
+            with session_scope() as session:
+                already_seen = get_webhook_event(event_id, session=session) is not None
+            if not already_seen:
+                try:
+                    await start_loading(source["userId"], LINE_CHANNEL_ACCESS_TOKEN)
+                except Exception as exc:  # noqa: BLE001 - cosmetic call, never fatal
+                    logger.warning("LINE loading indicator failed: %s", type(exc).__name__)
 
         with session_scope() as session:
             processed = get_webhook_event(event_id, session=session)
@@ -986,12 +991,11 @@ async def line_webhook(
                 if event_type == "follow":
                     result: str | Reply | None = format_onboarding_welcome()
                 elif event_type == "postback":
-                    command = parse_postback(postback_data)
                     result = (
                         None
-                        if command is None
+                        if postback_command is None
                         else handle_postback(
-                            source["userId"], command, _event_datetime(event.get("timestamp")), session
+                            source["userId"], postback_command, _event_datetime(event.get("timestamp")), session
                         )
                     )
                 else:
