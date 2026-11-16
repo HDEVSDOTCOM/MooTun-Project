@@ -112,7 +112,9 @@ describe("Transactions edit entry", () => {
     state.resource.data = { items: [row], truncated: false, limit: 500 };
     renderAt(<Transactions />);
     fireEvent.click(screen.getByRole("button", { name: /<b>50.00<\/b>/ }));
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
     cleanup(); // hiding the app unmounts every screen
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
     state.paths = [];
     renderAt(<Transactions />);
     expect(screen.getByRole("dialog")).toBeTruthy();

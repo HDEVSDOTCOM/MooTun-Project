@@ -31,13 +31,13 @@ export function bangkokToday(now = new Date()): string {
 // A row saved without a category gets a real one instead, since an empty one cannot be saved.
 export function categoryOptions(categories: Categories, kind: Kind, original: TransactionItem): string[] {
   const options = categories[kind];
-  return kind === original.transaction_type && original.category && !options.includes(original.category)
+  return kind === original.transaction_type && original.category.trim() && !options.includes(original.category)
     ? [original.category, ...options]
     : options;
 }
 
 function startingCategory(categories: Categories, kind: Kind, original: TransactionItem): string {
-  return kind === original.transaction_type && original.category
+  return kind === original.transaction_type && original.category.trim()
     ? original.category
     : categories[kind][categories[kind].length - 1];
 }
@@ -87,6 +87,7 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
   };
 
   useEffect(() => {
+    if (open?.id !== id) open = { id, fromChat, draft: null };
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     title.current?.focus();
     const { overflow } = document.body.style;
@@ -99,12 +100,13 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
       if (nodes.length === 0) return;
       const first = nodes[0];
       const last = nodes[nodes.length - 1];
+      // The heading takes focus on open but is not a control, so it counts as "outside" too.
       const active = document.activeElement;
-      const inside = active instanceof Node && dialog.current.contains(active);
-      if (event.shiftKey && (active === first || !inside)) {
+      const onControl = nodes.some((node) => node === active);
+      if (event.shiftKey && (active === first || !onControl)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && (active === last || !inside)) {
+      } else if (!event.shiftKey && (active === last || !onControl)) {
         event.preventDefault();
         first.focus();
       }
@@ -113,6 +115,8 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
     return () => {
       document.body.style.overflow = overflow;
       window.removeEventListener("keydown", onKey);
+      // Hiding the app unmounts the sheet to be reopened; any other unmount ends it.
+      if (!document.hidden) rememberedEdit.forget();
       opener?.focus();
     };
     // Mount-only: close() reads the busy ref, so a stale closure is harmless.
@@ -242,11 +246,10 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
       : undefined;
     try {
       await sendMe(method, `/api/me/transactions/${item.id}`, token, body);
+      // Saved: nothing left to reopen. busy stays set so nothing closes the sheet twice.
+      rememberedEdit.forget();
       setDone(message);
-      later(() => {
-        busy.current = false;
-        onDone(method);
-      }, DONE_MS);
+      later(() => onDone(method), DONE_MS);
     } catch (error) {
       busy.current = false;
       setSending(false);
@@ -342,10 +345,14 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
         <label htmlFor={ids.date} className="text-sm text-muted">วันที่</label>
         {/* iOS draws a native date input in the phone's language and lets it overflow; show
             the Thai date instead and lay the transparent native input over it for the picker. */}
-        <div className={`relative mt-1 flex items-center ${input}${invalid("occurred_on")}`}>
+        <div className={`relative mt-1 flex items-center focus-within:ring-2 focus-within:ring-brand/40 ${input}${invalid("occurred_on")}`}>
           <span aria-hidden="true">{calendarDate(date)}</span>
           <input id={ids.date} type="date" value={date} min="2000-01-01" max={bangkokToday()} required
             onChange={(event) => { if (event.target.value) setDate(event.target.value); }}
+            onClick={(event) => {
+              // The input is invisible, so open the picker wherever it is tapped.
+              try { event.currentTarget.showPicker(); } catch { /* not supported: native focus */ }
+            }}
             aria-invalid={field === "occurred_on"}
             className="absolute inset-0 block h-full w-full min-w-0 appearance-none opacity-0" />
         </div>
