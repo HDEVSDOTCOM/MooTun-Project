@@ -676,7 +676,10 @@ def test_frontend_source_authentication_rendering_and_lifecycle_contract():
     assert 'Authorization: `Bearer ${token}`' in api
     assert 'cache: "no-store"' in api and 'credentials: "omit"' in api
     assert "withLoginOnExternalBrowser: false" in liff
-    assert 'new URL("/app/", window.location.origin).href' in liff
+    # Same-origin return path rebuilt from an allowlist of tabs (plus ?edit=<digits>), never echoed.
+    assert "new URL(returnPath(), window.location.origin).href" in liff
+    assert "const RETURN_TAB = /^\/app\/(?:summary|analysis|transactions|savings|settings)?$/;" in liff
+    assert "const RETURN_EDIT = /^\?edit=[0-9]{1,9}$/;" in liff
     assert "if (liff.isLoggedIn()) liff.logout();" in liff
     # Null token -> explicit login prompt, before the summary bootstrap.
     null_branch = session.split("if (!token) {", 1)[1].split("}", 1)[0]
