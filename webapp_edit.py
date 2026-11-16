@@ -60,7 +60,7 @@ def parse_edit_body(raw: bytes, *, today: date, current_type: str, current_categ
     if not category:
         raise _invalid("category")
     # The row's own category stays valid for its own type, so legacy rows save unchanged.
-    if category not in categories(kind) and (kind, category) != (current_type, current_category):
+    if category not in categories(kind) and (kind, category) != (current_type, current_category.strip()):
         raise _invalid("category")
 
     description = body["description"]

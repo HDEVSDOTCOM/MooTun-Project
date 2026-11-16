@@ -244,3 +244,16 @@ def test_zero_padded_id_is_not_found(web):
     assert _patch(client, padded, BODY).status_code == 404
     assert client.delete(f"/api/me/transactions/{padded}", headers=headers()).status_code == 404
     assert client.get(f"/api/me/transactions/{tx_id}", headers=headers()).status_code == 200
+
+
+def test_padded_legacy_category_saves_unchanged(web):
+    client, engine, _ = web
+    seed(engine)
+    tx_id = _ids(engine, A)[0]
+    with Session(engine) as session:
+        row = session.get(Transaction, tx_id)
+        row.category = " ของเก่า "
+        kind = row.transaction_type
+        session.commit()
+    response = _patch(client, tx_id, {**BODY, "transaction_type": kind, "category": "ของเก่า"})
+    assert response.status_code == 200 and response.json()["category"] == "ของเก่า"

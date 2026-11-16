@@ -36,6 +36,10 @@ vi.mock("../liff", () => ({
 
 const { EditSheet, bangkokToday, rememberedEdit } = await import("../components/EditSheet");
 
+function hidden(value: boolean) {
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
+}
+
 function renderSheet(fromChat = false) {
   const onClose = vi.fn();
   const onChanged = vi.fn();
@@ -250,10 +254,50 @@ describe("EditSheet review follow-ups", () => {
   it("keeps what was typed when the app is hidden and shown again", () => {
     renderSheet();
     fireEvent.change(screen.getByLabelText("จำนวนเงิน"), { target: { value: "70" } });
+    hidden(true);
     cleanup(); // hiding the app unmounts every screen
+    hidden(false);
     expect(rememberedEdit()).toEqual({ id: 7, fromChat: false });
     renderSheet();
     expect((screen.getByLabelText("จำนวนเงิน") as HTMLInputElement).value).toBe("70");
+  });
+
+  it("forgets the sheet when it unmounts for any other reason", () => {
+    renderSheet();
+    cleanup(); // e.g. Back to another tab while the page stays visible
+    expect(rememberedEdit()).toBeNull();
+  });
+
+  it("forgets the sheet as soon as a save succeeds", async () => {
+    vi.useFakeTimers();
+    renderSheet(true);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "บันทึก" }));
+    });
+    expect(rememberedEdit()).toBeNull();
+  });
+
+  it("does not close twice when Escape is pressed while the chat message is sending", async () => {
+    vi.useFakeTimers();
+    let release = () => {};
+    state.chat = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+    const { onClose } = renderSheet(true);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "บันทึก" }));
+    });
+    await act(async () => vi.advanceTimersByTime(800));
+    fireEvent.keyDown(window, { key: "Escape" });
+    await act(async () => release());
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("wraps Shift+Tab from the heading to the last control", () => {
+    renderSheet();
+    const dialog = screen.getByRole("dialog");
+    expect(document.activeElement?.tagName).toBe("H2");
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    const nodes = dialog.querySelectorAll<HTMLElement>("button:not([disabled]), input, select");
+    expect(document.activeElement).toBe(nodes[nodes.length - 1]);
   });
 
   it("forgets the draft once the sheet is closed", () => {
@@ -266,8 +310,8 @@ describe("EditSheet review follow-ups", () => {
     expect((screen.getByLabelText("จำนวนเงิน") as HTMLInputElement).value).toBe("50.00");
   });
 
-  it("offers a real category for a row saved without one", () => {
-    state.item = { ...ITEM, category: "" };
+  it.each(["", "   "])("offers a real category for a row saved without one (%j)", (blank) => {
+    state.item = { ...ITEM, category: blank };
     renderSheet();
     expect(options()).toEqual(["อาหาร", "เดินทาง", "อื่นๆ"]);
     expect((screen.getByLabelText("หมวด") as HTMLSelectElement).value).toBe("อื่นๆ");
