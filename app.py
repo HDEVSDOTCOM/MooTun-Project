@@ -129,6 +129,7 @@ from repository import (
     mark_webhook_processed,
     mark_webhook_replied,
     monthly_summary,
+    recent_edit_before,
     replace_pending_action_with_confirm,
     replace_pending_action_with_delete_all,
     restore_deleted_transaction,
@@ -246,10 +247,21 @@ def _card_context(line_user_id: str, item: Any, session: Session) -> tuple[dict[
     return {**_transaction_data(item), "id": item.id}, MonthTotal(category_satang, type_total)
 
 
-def _transaction_reply(variant: str, text: str, line_user_id: str, item: Any, session: Session) -> Reply:
+def _transaction_reply(
+    variant: str, text: str, line_user_id: str, item: Any, session: Session,
+    *, before: dict[str, Any] | None = None,
+) -> Reply:
     tx, total = _card_context(line_user_id, item, session)
-    card = transaction_card(variant, tx, total, liff_id=_liff_id(), image_url=_card_image(variant))
+    card = transaction_card(variant, tx, total, liff_id=_liff_id(), image_url=_card_image(variant), before=before)
     return Reply(text, flex=card)
+
+
+def _edited_reply(line_user_id: str, item: Any, session: Session) -> Reply:
+    """The "แก้แล้ว" card, with the values a recent edit replaced struck through."""
+
+    before = recent_edit_before(item, now=_utc_now())
+    text = format_edit_confirmation(_transaction_data(item), before=before)
+    return _transaction_reply("edit", text, line_user_id, item, session, before=before)
 
 
 def _deleted_reply(line_user_id: str, item: Any, action_id: str | None, session: Session) -> Reply:
@@ -301,7 +313,7 @@ def _edit_receipt_reply(line_user_id: str, transaction_id: int, session: Session
     item = get_transaction(line_user_id, transaction_id, session=session)
     if item is None:
         return format_already_deleted()
-    return _transaction_reply("edit", format_edit_confirmation(_transaction_data(item)), line_user_id, item, session)
+    return _edited_reply(line_user_id, item, session)
 
 
 def handle_text_message(
@@ -535,12 +547,11 @@ def handle_text_message(
                 command.transaction_date if command.explicit_occurred_on else None
             ),
             session=session,
+            now=_utc_now(),
         )
         if item is None:
             return "ยังไม่มีรายการให้แก้ครับ"
-        return _transaction_reply(
-            "edit", format_edit_confirmation(_transaction_data(item)), line_user_id, item, session
-        )
+        return _edited_reply(line_user_id, item, session)
 
     if pending is not None and isinstance(command, TransactionCommand):
         if pending_delete_confirmation is not None:

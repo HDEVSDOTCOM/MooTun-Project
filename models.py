@@ -59,6 +59,9 @@ class Transaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+    # What the latest edit replaced (JSON), so the next "แก้แล้ว" card can strike it through.
+    edited_from: Mapped[str | None] = mapped_column(Text, nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @property
     def amount(self) -> Decimal:
