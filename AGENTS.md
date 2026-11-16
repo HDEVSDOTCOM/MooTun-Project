@@ -34,12 +34,15 @@ Reads use `ReadOnlySession` (SELECT-only guard). The only writes are the edit fo
 committed via `database.session_scope()`; other users' and missing ids give the same 404.
 Editing or deleting a row drops a pending `confirm_delete` on it. ✏️ on chat cards opens
 `/transactions?edit=<id>`, which `Transactions.tsx` turns into `components/EditSheet.tsx`.
+After a save opened from a card, the sheet posts `แก้รายการ #<id> แล้ว` as the user via
+`liff.sendMessages` (needs the LIFF `chat_message.write` scope in the LINE console);
+`app.EDIT_RECEIPT` answers it before any pending-state read with a fresh "แก้แล้ว" card.
 
 Chat cards: `handle_text_message`/`handle_postback` return `str | Reply` (`replies.py`:
 text = altText, optional Flex card and quick replies). `flex.py` builds cards (pure JSON;
 visible amounts via `messages.format_amount`, satang only sizes bars). `postback.py`
 accepts only `a=del&t=<id>`, `a=undo&id=<hex32>`, `a=help&t=<topic>`; anything else
-(including the rich menu's `richmenu=…`) is claimed with no reply. Card ✕ calls
+(including the rich menu's `richmenu=…`) is claimed with no reply. Card 🗑️ calls
 `repository.delete_transaction_with_undo` (supersedes any pending action, keeps the
 draft). Card replies are cached as JSON in `processed_webhook_events.response_messages`
 for redelivery; plain text still replays from `response_text`. At send time
