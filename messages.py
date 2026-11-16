@@ -123,15 +123,48 @@ def format_transaction_confirmation(transaction: Mapping[str, object]) -> str:
     )
 
 
-def format_edit_confirmation(transaction: Mapping[str, object]) -> str:
-    """Confirm that the latest transaction was replaced in Thai."""
+def format_edit_confirmation(
+    transaction: Mapping[str, object], *, before: Mapping[str, object] | None = None
+) -> str:
+    """Confirm that a transaction was replaced in Thai, naming what the edit replaced."""
 
     kind = _kind(transaction.get("type"))
     amount = abs(_decimal(transaction.get("amount", 0)))
+    changes = edit_changes(before, transaction)
+    replaced = f"\nเดิม: {' · '.join(changes)}" if changes else ""
     return limit_line_text(
         f"✏️ แก้แล้ว! ตอนนี้เป็น{kind} {format_amount(amount)} บาท\n"
-        f"{_details(transaction)}"
+        f"{_details(transaction)}{replaced}"
     )
+
+
+def signed_amount(transaction: Mapping[str, object]) -> str:
+    """Card-style amount: -฿50 for an expense, +฿20,000 for income."""
+
+    sign = "+" if _kind(transaction.get("type")) == "รายรับ" else "-"
+    return f"{sign}฿{format_amount(abs(_decimal(transaction.get('amount', 0))))}"
+
+
+def edit_changes(before: Mapping[str, object] | None, after: Mapping[str, object]) -> list[str]:
+    """The old values an edit replaced, in card order: amount, category, note, date."""
+
+    if before is None:
+        return []
+    changes = []
+    if signed_amount(before) != signed_amount(after):
+        changes.append(signed_amount(before))
+    if _clean(before.get("category"), "") != _clean(after.get("category"), ""):
+        changes.append(_clean(before.get("category"), "ไม่ระบุหมวด"))
+    if _note(before) != _note(after):
+        changes.append(_note(before) or "ไม่มีรายการ")
+    if _format_date(before.get("date")) != _format_date(after.get("date")):
+        changes.append(_format_date(before.get("date")) or "ไม่ระบุวันที่")
+    return changes
+
+
+def _note(transaction: Mapping[str, object]) -> str:
+    note = _clean(transaction.get("note"), "")
+    return "" if note == "ไม่ระบุรายการ" else note
 
 
 def format_delete_confirmation_prompt(transaction: Mapping[str, object]) -> str:
