@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import event
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 import database
 import media
@@ -342,16 +343,17 @@ def savings(owner: Owner, session: ReadSession):
 MAX_TX_ID = 999_999_999
 
 
-def _tx_id(value: int) -> int:
-    # Ids fit the INTEGER column; anything larger is simply not found.
-    if not 0 < value <= MAX_TX_ID:
+def _tx_id(request: Request, value: int) -> int:
+    # Ids fit the INTEGER column; anything larger is simply not found. Only the
+    # canonical spelling is an id, so "007" is not another name for 7.
+    if not 0 < value <= MAX_TX_ID or request.url.path.rsplit("/", 1)[-1] != str(value):
         raise WebAppError(404, "NOT_FOUND")
     return value
 
 
 @router.get("/api/me/transactions/{tx_id:int}")
-def transaction_item(tx_id: int, owner: Owner, session: ReadSession):
-    item = get_transaction(owner, _tx_id(tx_id), session=session)
+def transaction_item(tx_id: int, owner: Owner, session: ReadSession, request: Request):
+    item = get_transaction(owner, _tx_id(request, tx_id), session=session)
     if item is None:
         raise WebAppError(404, "NOT_FOUND")
     return _transaction_item(item)
@@ -373,7 +375,12 @@ def _apply_edit(owner: str, tx_id: int, raw: bytes) -> dict:
                 category=fields.category, description=fields.description,
                 occurred_on=fields.occurred_on, session=session,
             )
+            if item is None:
+                raise WebAppError(404, "NOT_FOUND")
             return _transaction_item(item)
+    except StaleDataError:
+        # Deleted by another request between our read and our write.
+        raise WebAppError(404, "NOT_FOUND") from None
     except SQLAlchemyError:
         raise WebAppError(503, "DATA_UNAVAILABLE") from None
 
@@ -383,6 +390,8 @@ def _apply_delete(owner: str, tx_id: int) -> None:
         with database.session_scope() as session:
             if not delete_transaction_by_id(owner, tx_id, session=session):
                 raise WebAppError(404, "NOT_FOUND")
+    except StaleDataError:
+        raise WebAppError(404, "NOT_FOUND") from None
     except SQLAlchemyError:
         raise WebAppError(503, "DATA_UNAVAILABLE") from None
 
@@ -402,14 +411,14 @@ async def _read_body(request: Request) -> bytes:
 
 @router.patch("/api/me/transactions/{tx_id:int}")
 async def edit_transaction(tx_id: int, owner: Owner, request: Request):
-    target = _tx_id(tx_id)
+    target = _tx_id(request, tx_id)
     raw = await _read_body(request)
     return await run_in_threadpool(_apply_edit, owner, target, raw)
 
 
 @router.delete("/api/me/transactions/{tx_id:int}", status_code=204)
-async def remove_transaction(tx_id: int, owner: Owner):
-    await run_in_threadpool(_apply_delete, owner, _tx_id(tx_id))
+async def remove_transaction(tx_id: int, owner: Owner, request: Request):
+    await run_in_threadpool(_apply_delete, owner, _tx_id(request, tx_id))
     return Response(status_code=204)
 
 

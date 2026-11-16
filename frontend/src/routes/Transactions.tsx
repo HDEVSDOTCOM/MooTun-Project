@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { MonthTransactions, TransactionItem } from "../api";
 import { MonthPicker } from "../components/MonthPicker";
-import { EditSheet } from "../components/EditSheet";
+import { EditSheet, rememberedEdit } from "../components/EditSheet";
 import { TransactionRow, transactionKey } from "../components/TransactionRow";
 import { Card, Empty, InlineError, Skeleton } from "../components/ui";
 import { bangkokMonth, calendarDate, monthParam, type YearMonth } from "../money";
@@ -40,7 +40,8 @@ export function Transactions() {
   const [params, setParams] = useSearchParams();
   const [editing, setEditing] = useState<Editing | null>(() => {
     const edit = params.get("edit");
-    return edit && EDIT_ID.test(edit) ? { id: Number(edit), fromChat: true } : null;
+    // Otherwise reopen a sheet the app was hidden on (the session unmounts every screen then).
+    return edit && EDIT_ID.test(edit) ? { id: Number(edit), fromChat: true } : rememberedEdit();
   });
   const [month, setMonth] = useState<YearMonth>(() =>
     summary ? { yearCe: summary.year_ce, month: summary.month } : bangkokMonth(),

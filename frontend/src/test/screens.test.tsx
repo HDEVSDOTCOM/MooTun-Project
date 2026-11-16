@@ -23,6 +23,7 @@ vi.mock("../session", () => ({
 
 const { Transactions, groupByDay } = await import("../routes/Transactions");
 const { Savings } = await import("../routes/Savings");
+const { rememberedEdit } = await import("../components/EditSheet");
 
 let nextId = 1;
 
@@ -36,6 +37,7 @@ function renderAt(ui: ReactNode, path = "/transactions") {
 
 afterEach(() => {
   cleanup();
+  rememberedEdit.forget();
   state.paths = [];
   state.resource = { data: null, error: null, loading: false, retry: () => {} };
 });
@@ -101,6 +103,18 @@ describe("Transactions edit entry", () => {
     state.resource.data = { items: [row], truncated: false, limit: 500 };
     renderAt(<Transactions />);
     fireEvent.click(screen.getByRole("button", { name: /<b>50.00<\/b>/ }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(state.paths).toContain(`/api/me/transactions/${row.id}`);
+  });
+
+  it("reopens a sheet from the list after the app was hidden", () => {
+    const row = item("2026-01-03", "50.00");
+    state.resource.data = { items: [row], truncated: false, limit: 500 };
+    renderAt(<Transactions />);
+    fireEvent.click(screen.getByRole("button", { name: /<b>50.00<\/b>/ }));
+    cleanup(); // hiding the app unmounts every screen
+    state.paths = [];
+    renderAt(<Transactions />);
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(state.paths).toContain(`/api/me/transactions/${row.id}`);
   });
