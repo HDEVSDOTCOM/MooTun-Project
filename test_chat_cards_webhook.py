@@ -328,3 +328,61 @@ def test_no_wait_without_loading_indicator(bot, monkeypatch):
     monkeypatch.setattr(app_module, "start_loading", broken)
     _post(client, text("e2", "ข้าว 50"))
     assert slept == []
+
+
+# --- Edit receipt: the Mini App says "แก้รายการ #<id> แล้ว" and the bot answers with a fresh card ---
+
+def test_edit_receipt_replies_with_current_values(bot):
+    client, engine, line = bot
+    _post(client, text("e1", "ข้าว 50"))
+    tx = _only_tx(engine)[0]
+    with Session(engine) as session:
+        session.get(Transaction, tx.id).amount_satang = 7000
+        session.commit()
+
+    assert _post(client, text("e2", f"แก้รายการ #{tx.id} แล้ว")).status_code == 200
+
+    message = _last(line)
+    assert message["type"] == "flex"
+    assert "แก้แล้ว" in message["altText"] and "70 บาท" in message["altText"]
+    dumped = json.dumps(message, ensure_ascii=False)
+    assert "แก้แล้ว ✏️" in dumped and "-฿70" in dumped
+    assert f"a=del&t={tx.id}" in _datas(message)
+    assert len(_only_tx(engine)) == 1
+
+
+def test_edit_receipt_for_missing_or_foreign_row_says_deleted(bot):
+    client, engine, line = bot
+    _post(client, text("e1", "ข้าว 50", user="U-b"))
+    foreign = _only_tx(engine)[0]
+
+    _post(client, text("e2", f"แก้รายการ #{foreign.id} แล้ว"))
+    assert _last(line)["text"] == format_already_deleted()
+    _post(client, text("e3", "แก้รายการ #999999999 แล้ว"))
+    assert _last(line)["text"] == format_already_deleted()
+    assert len(_only_tx(engine)) == 1
+
+
+def test_edit_receipt_leaves_pending_draft_alone(bot):
+    client, engine, line = bot
+    _post(client, text("e1", "ข้าว 50"))
+    tx_id = _only_tx(engine)[0].id
+    _post(client, text("e2", "กาแฟ"))
+    with Session(engine) as session:
+        before = session.get(PendingTransaction, "U-a")
+        assert before is not None
+        version, expires = before.version, before.expires_at
+
+    _post(client, text("e3", f"แก้รายการ #{tx_id} แล้ว"))
+
+    with Session(engine) as session:
+        after = session.get(PendingTransaction, "U-a")
+        assert after is not None and (after.version, after.expires_at) == (version, expires)
+    assert len(_only_tx(engine)) == 1
+
+
+@pytest.mark.parametrize("message", ["แก้รายการ #0 แล้ว", "แก้รายการ #1234567890 แล้ว", "แก้รายการ 5 แล้ว"])
+def test_edit_receipt_lookalikes_are_not_receipts(bot, message):
+    client, engine, line = bot
+    _post(client, text("e1", message))
+    assert "แก้แล้ว ✏️" not in json.dumps(_last(line), ensure_ascii=False)

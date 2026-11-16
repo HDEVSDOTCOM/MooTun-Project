@@ -30,6 +30,17 @@ export function closeWindow(): void {
   if (initialized) liff.closeWindow();
 }
 
+// Posts a text into the chat as the user, so the bot can answer with a fresh card.
+// Needs the chat_message.write scope and a LIFF opened from a chat; otherwise it does nothing.
+export async function sendToChat(text: string): Promise<void> {
+  if (!initialized || !liff.isInClient()) return;
+  try {
+    await liff.sendMessages([{ type: "text", text }]);
+  } catch {
+    // Missing scope or not opened from a chat: the edit is already saved, so stay quiet.
+  }
+}
+
 export function idToken(): string | null {
   return liff.getIDToken();
 }

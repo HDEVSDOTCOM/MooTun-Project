@@ -1,10 +1,17 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, sendMe, type Categories, type EditBody, type TransactionItem } from "../api";
-import { closeWindow } from "../liff";
+import { closeWindow, sendToChat } from "../liff";
+import { calendarDate } from "../money";
 import { useMe, useSession } from "../session";
 import { InlineError, Skeleton } from "./ui";
 
 type Kind = TransactionItem["transaction_type"];
+type Method = "PATCH" | "DELETE";
+
+// Must match app.EDIT_RECEIPT on the bot side.
+export function editReceipt(id: number): string {
+  return `แก้รายการ #${id} แล้ว`;
+}
 
 const KINDS: { value: Kind; label: string }[] = [
   { value: "expense", label: "รายจ่าย" },
@@ -62,8 +69,12 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
     // Mount-only: close() reads the busy ref, so a stale closure is harmless.
   }, []);
 
-  const finish = () => {
-    if (fromChat) closeWindow();
+  const finish = async (method: Method) => {
+    if (fromChat) {
+      // The bot answers this with a card showing the saved values (app.EDIT_RECEIPT).
+      if (method === "PATCH") await sendToChat(editReceipt(id)).catch(() => {});
+      closeWindow();
+    }
     onChanged();
     onClose();
   };
@@ -84,7 +95,7 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
   } else if (item.data && categories.data) {
     body = (
       <EditForm item={item.data} categories={categories.data} busy={busy}
-        onGone={() => setGone(true)} onDone={finish} />
+        onGone={() => setGone(true)} onDone={(method) => void finish(method)} />
     );
   } else {
     body = (
@@ -123,7 +134,7 @@ interface FormProps {
   categories: Categories;
   busy: { current: boolean };
   onGone: () => void;
-  onDone: () => void;
+  onDone: (method: Method) => void;
 }
 
 function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
@@ -162,7 +173,7 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
     setField(null);
   };
 
-  const run = async (method: "PATCH" | "DELETE", message: string) => {
+  const run = async (method: Method, message: string) => {
     if (!token || busy.current) return;
     busy.current = true;
     setSending(true);
@@ -177,7 +188,7 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
       setDone(message);
       later(() => {
         busy.current = false;
-        onDone();
+        onDone(method);
       }, DONE_MS);
     } catch (error) {
       busy.current = false;
@@ -271,9 +282,15 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
 
       <div>
         <label htmlFor={ids.date} className="text-sm text-muted">วันที่</label>
-        <input id={ids.date} type="date" value={date} min="2000-01-01" max={bangkokToday()}
-          onChange={(event) => setDate(event.target.value)}
-          aria-invalid={field === "occurred_on"} className={`mt-1 ${input}${invalid("occurred_on")}`} />
+        {/* iOS draws a native date input in the phone's language and lets it overflow; show
+            the Thai date instead and lay the transparent native input over it for the picker. */}
+        <div className={`relative mt-1 flex items-center ${input}${invalid("occurred_on")}`}>
+          <span aria-hidden="true">{calendarDate(date)}</span>
+          <input id={ids.date} type="date" value={date} min="2000-01-01" max={bangkokToday()} required
+            onChange={(event) => { if (event.target.value) setDate(event.target.value); }}
+            aria-invalid={field === "occurred_on"}
+            className="absolute inset-0 block h-full w-full min-w-0 appearance-none opacity-0" />
+        </div>
         <FieldHint show={field === "occurred_on"} />
       </div>
 

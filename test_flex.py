@@ -151,3 +151,12 @@ def test_help_topic_examples_parse():
         for command in re.findall(r'"([^"]+)"', text):
             result = parse_command(command)
             assert not isinstance(result, (UnresolvedCommand, IncompleteCommand)), command
+
+
+def test_delete_button_is_a_trash_can_not_a_close_mark():
+    card = transaction_card("record", EXPENSE, TOTAL, liff_id="LIFF", image_url=None)
+    delete = next(node for node in _walk(card) if isinstance(node.get("action"), dict)
+                  and node["action"].get("data") == "a=del&t=7")
+    assert delete["contents"][0]["text"] == "🗑️"
+    assert "✕" not in json.dumps(card, ensure_ascii=False)
+    assert "✕" not in HELP_TOPIC_TEXT["edit"] and "🗑️" in HELP_TOPIC_TEXT["edit"]

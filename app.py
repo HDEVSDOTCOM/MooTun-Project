@@ -122,6 +122,7 @@ from repository import (
     get_pending_action,
     get_savings_goal,
     get_pending_transaction,
+    get_transaction,
     get_user_data_summary,
     get_webhook_event,
     list_recent_transactions,
@@ -291,6 +292,18 @@ def _thai_month_label(moment: datetime) -> str:
     return format_buddhist_month(local)
 
 
+# Sent by the Mini App (as the user) after an edit opened from a chat card, so the
+# chat gets a fresh card. Nine digits at most keeps the id inside a 32-bit integer.
+EDIT_RECEIPT = re.compile(r"แก้รายการ #([1-9][0-9]{0,8}) แล้ว")
+
+
+def _edit_receipt_reply(line_user_id: str, transaction_id: int, session: Session) -> str | Reply:
+    item = get_transaction(line_user_id, transaction_id, session=session)
+    if item is None:
+        return format_already_deleted()
+    return _transaction_reply("edit", format_edit_confirmation(_transaction_data(item)), line_user_id, item, session)
+
+
 def handle_text_message(
     line_user_id: str,
     text: str,
@@ -301,6 +314,11 @@ def handle_text_message(
 
     processing_time = _utc_now()
     normalized_text = text.strip().lower()
+
+    # Stateless, so it runs before anything that reads or refreshes pending state.
+    receipt = EDIT_RECEIPT.fullmatch(text.strip())
+    if receipt is not None:
+        return _edit_receipt_reply(line_user_id, int(receipt.group(1)), session)
 
     # Export must not touch draft/action reads that can perform expiry cleanup.
     if normalized_text == "ส่งออกข้อมูล":

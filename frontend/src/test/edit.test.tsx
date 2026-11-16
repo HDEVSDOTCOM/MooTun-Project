@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   itemError: null as unknown,
   send: vi.fn(),
   close: vi.fn(),
+  chat: vi.fn(),
   requireAuth: vi.fn(),
 }));
 
@@ -28,7 +29,10 @@ vi.mock("../api", async (original) => ({
   sendMe: (...args: unknown[]) => state.send(...args),
 }));
 
-vi.mock("../liff", () => ({ closeWindow: () => state.close() }));
+vi.mock("../liff", () => ({
+  closeWindow: () => state.close(),
+  sendToChat: (text: string) => state.chat(text),
+}));
 
 const { EditSheet, bangkokToday } = await import("../components/EditSheet");
 
@@ -48,6 +52,7 @@ beforeEach(() => {
   state.itemError = null;
   state.send = vi.fn(async () => ITEM);
   state.close = vi.fn();
+  state.chat = vi.fn(async () => {});
   state.requireAuth = vi.fn();
 });
 
@@ -89,10 +94,42 @@ describe("EditSheet", () => {
       occurred_on: "2026-01-03",
     });
     expect(screen.getByRole("status").textContent).toContain("บันทึกแล้ว");
-    act(() => vi.advanceTimersByTime(800));
+    await act(async () => vi.advanceTimersByTime(800));
+    expect(state.chat).toHaveBeenCalledWith("แก้รายการ #7 แล้ว");
+    expect(state.chat.mock.invocationCallOrder[0]).toBeLessThan(state.close.mock.invocationCallOrder[0]);
     expect(state.close).toHaveBeenCalledOnce();
     expect(onChanged).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("still returns to the chat when the chat message cannot be sent", async () => {
+    vi.useFakeTimers();
+    state.chat = vi.fn(async () => { throw new Error("no scope"); });
+    renderSheet(true);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "บันทึก" }));
+    });
+    await act(async () => vi.advanceTimersByTime(800));
+    expect(state.close).toHaveBeenCalledOnce();
+  });
+
+  it("sends nothing to the chat after a delete", async () => {
+    vi.useFakeTimers();
+    renderSheet(true);
+    fireEvent.click(screen.getByRole("button", { name: "ลบรายการนี้" }));
+    act(() => vi.advanceTimersByTime(500));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "แตะอีกครั้งเพื่อลบ" }));
+    });
+    await act(async () => vi.advanceTimersByTime(800));
+    expect(state.chat).not.toHaveBeenCalled();
+    expect(state.close).toHaveBeenCalledOnce();
+  });
+
+  it("shows the date in Thai while keeping the native picker", () => {
+    renderSheet();
+    expect(screen.getByText("3 ม.ค. 2569")).toBeTruthy();
+    expect((screen.getByLabelText("วันที่") as HTMLInputElement).type).toBe("date");
   });
 
   it("does not close LINE when opened from the list", async () => {
@@ -101,8 +138,9 @@ describe("EditSheet", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "บันทึก" }));
     });
-    act(() => vi.advanceTimersByTime(800));
+    await act(async () => vi.advanceTimersByTime(800));
     expect(state.close).not.toHaveBeenCalled();
+    expect(state.chat).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledOnce();
   });
 
