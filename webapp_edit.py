@@ -40,7 +40,7 @@ def parse_edit_body(raw: bytes, *, today: date, current_type: str, current_categ
         raise _invalid("body")
     try:
         body = json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         raise _invalid("body") from None
     if not isinstance(body, dict) or set(body) != FIELDS:
         raise _invalid("body")
@@ -57,6 +57,8 @@ def parse_edit_body(raw: bytes, *, today: date, current_type: str, current_categ
     if not isinstance(category, str):
         raise _invalid("category")
     category = category.strip()
+    if not category:
+        raise _invalid("category")
     # The row's own category stays valid for its own type, so legacy rows save unchanged.
     if category not in categories(kind) and (kind, category) != (current_type, current_category):
         raise _invalid("category")

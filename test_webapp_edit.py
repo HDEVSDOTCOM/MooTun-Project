@@ -184,3 +184,63 @@ def test_body_read_stops_at_the_cap_without_content_length():
         asyncio.run(routes._read_body(request))
     assert (caught.value.status_code, caught.value.field) == (422, "body")
     assert len(pulled) <= MAX_BODY_BYTES // 1024 + 1
+
+
+# --- Deferred minors from the edit-form review ---
+
+def test_deeply_nested_body_is_a_422_not_a_crash(web, monkeypatch):
+    from types import SimpleNamespace
+
+    import webapp_edit
+
+    client, engine, _ = web
+    seed(engine)
+    tx_id = _ids(engine, A)[0]
+    # Older Pythons raise RecursionError on deep nesting well inside the 4 KB cap.
+    def too_deep(raw):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(webapp_edit, "json", SimpleNamespace(loads=too_deep))
+    response = _patch(client, tx_id, None, raw=b"[" * 2000 + b"]" * 2000)
+    assert response.status_code == 422 and response.json()["field"] == "body"
+
+
+@pytest.mark.parametrize("method", ["patch", "delete"])
+def test_row_deleted_mid_write_is_404(web, monkeypatch, method):
+    from sqlalchemy.orm.exc import StaleDataError
+
+    client, engine, _ = web
+    seed(engine)
+    tx_id = _ids(engine, A)[0]
+
+    def stale(*args, **kwargs):
+        raise StaleDataError("row vanished")
+
+    monkeypatch.setattr(routes, "update_transaction" if method == "patch" else "delete_transaction_by_id", stale)
+    response = (_patch(client, tx_id, BODY) if method == "patch"
+                else client.delete(f"/api/me/transactions/{tx_id}", headers=headers()))
+    assert response.status_code == 404 and response.json()["code"] == "NOT_FOUND"
+
+
+def test_empty_category_is_rejected_even_on_a_row_without_one(web):
+    client, engine, _ = web
+    seed(engine)
+    tx_id = _ids(engine, A)[0]
+    with Session(engine) as session:
+        row = session.get(Transaction, tx_id)
+        row.category = ""
+        kind = row.transaction_type
+        session.commit()
+    response = _patch(client, tx_id, {**BODY, "transaction_type": kind, "category": "  "})
+    assert response.status_code == 422 and response.json()["field"] == "category"
+
+
+def test_zero_padded_id_is_not_found(web):
+    client, engine, _ = web
+    seed(engine)
+    tx_id = _ids(engine, A)[0]
+    padded = f"0{tx_id}"
+    assert client.get(f"/api/me/transactions/{padded}", headers=headers()).status_code == 404
+    assert _patch(client, padded, BODY).status_code == 404
+    assert client.delete(f"/api/me/transactions/{padded}", headers=headers()).status_code == 404
+    assert client.get(f"/api/me/transactions/{tx_id}", headers=headers()).status_code == 200

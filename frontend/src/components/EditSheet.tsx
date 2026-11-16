@@ -28,12 +28,38 @@ export function bangkokToday(now = new Date()): string {
 }
 
 // The row's own category stays selectable for its own type, so legacy rows save unchanged.
+// A row saved without a category gets a real one instead, since an empty one cannot be saved.
 export function categoryOptions(categories: Categories, kind: Kind, original: TransactionItem): string[] {
   const options = categories[kind];
-  return kind === original.transaction_type && !options.includes(original.category)
+  return kind === original.transaction_type && original.category && !options.includes(original.category)
     ? [original.category, ...options]
     : options;
 }
+
+function startingCategory(categories: Categories, kind: Kind, original: TransactionItem): string {
+  return kind === original.transaction_type && original.category
+    ? original.category
+    : categories[kind][categories[kind].length - 1];
+}
+
+interface Draft {
+  kind: Kind;
+  amount: string;
+  category: string;
+  description: string;
+  date: string;
+}
+
+// Hiding the app drops every rendered value (session.tsx), which unmounts this sheet.
+// Remember which sheet was open and what was typed, in memory only, until it closes.
+let open: { id: number; fromChat: boolean; draft: Draft | null } | null = null;
+
+export const rememberedEdit = Object.assign(
+  (): { id: number; fromChat: boolean } | null => (open ? { id: open.id, fromChat: open.fromChat } : null),
+  { forget: () => { open = null; } },
+);
+
+const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled])";
 
 interface Props {
   id: number;
@@ -49,27 +75,51 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
   const busy = useRef(false);
   const titleId = useId();
   const title = useRef<HTMLHeadingElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  useState(() => {
+    if (open?.id !== id) open = { id, fromChat, draft: null };
+  });
 
   const close = () => {
-    if (!busy.current) onClose();
+    if (busy.current) return;
+    rememberedEdit.forget();
+    onClose();
   };
 
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     title.current?.focus();
     const { overflow } = document.body.style;
     document.body.style.overflow = "hidden";
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
+      if (event.key !== "Tab" || !dialog.current) return;
+      // Keep Tab inside the sheet: the page behind it is inert while it is open.
+      const nodes = Array.from(dialog.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+      const inside = active instanceof Node && dialog.current.contains(active);
+      if (event.shiftKey && (active === first || !inside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !inside)) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = overflow;
       window.removeEventListener("keydown", onKey);
+      opener?.focus();
     };
     // Mount-only: close() reads the busy ref, so a stale closure is harmless.
   }, []);
 
   const finish = async (method: Method) => {
+    rememberedEdit.forget();
     if (fromChat) {
       // The bot answers this with a card showing the saved values (app.EDIT_RECEIPT).
       if (method === "PATCH") await sendToChat(editReceipt(id)).catch(() => {});
@@ -84,7 +134,7 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
     body = (
       <div className="py-6 text-center">
         <p className="font-medium">รายการนี้ถูกลบไปแล้ว</p>
-        <button type="button" onClick={onClose}
+        <button type="button" onClick={close}
           className="mt-4 min-h-11 rounded-2xl bg-brand-soft px-6 font-medium text-brand">
           ปิด
         </button>
@@ -108,7 +158,7 @@ export function EditSheet({ id, fromChat, onClose, onChanged }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div aria-hidden="true" onClick={close} className="sheet-backdrop absolute inset-0 bg-ink/40" />
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId}
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId}
         className="sheet relative max-h-[92dvh] w-full max-w-xl overflow-y-auto rounded-t-3xl bg-card px-4 pt-2 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_-12px_rgba(120,40,80,.35)]">
         <div aria-hidden="true" className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" />
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -139,11 +189,18 @@ interface FormProps {
 
 function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
   const { token, requireAuth } = useSession();
-  const [kind, setKind] = useState<Kind>(item.transaction_type);
-  const [amount, setAmount] = useState(item.amount_baht);
-  const [category, setCategory] = useState(item.category);
-  const [description, setDescription] = useState(item.description ?? "");
-  const [date, setDate] = useState(item.occurred_on);
+  const [saved] = useState(() => (open?.id === item.id ? open.draft : null));
+  const [kind, setKind] = useState<Kind>(saved?.kind ?? item.transaction_type);
+  const [amount, setAmount] = useState(saved?.amount ?? item.amount_baht);
+  const [category, setCategory] = useState(
+    () => saved?.category ?? startingCategory(categories, item.transaction_type, item),
+  );
+  const [description, setDescription] = useState(saved?.description ?? item.description ?? "");
+  const [date, setDate] = useState(saved?.date ?? item.occurred_on);
+
+  useEffect(() => {
+    if (open?.id === item.id) open.draft = { kind, amount, category, description, date };
+  }, [item.id, kind, amount, category, description, date]);
   const [sending, setSending] = useState(false);
   const [field, setField] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -169,7 +226,7 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
     if (next === kind) return;
     setKind(next);
     // Back to the original type restores the original category, legacy ones included.
-    setCategory(next === item.transaction_type ? item.category : categories[next][categories[next].length - 1]);
+    setCategory(startingCategory(categories, next, item));
     setField(null);
   };
 
@@ -250,6 +307,7 @@ function EditForm({ item, categories, busy, onGone, onDone }: FormProps) {
           );
         })}
       </div>
+      <FieldHint show={field === "transaction_type"} />
 
       <div>
         <label htmlFor={ids.amount} className="text-sm text-muted">จำนวนเงิน</label>

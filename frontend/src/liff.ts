@@ -45,8 +45,19 @@ export function idToken(): string | null {
   return liff.getIDToken();
 }
 
-// Explicit recovery only, never an automatic login loop. Fixed same-origin return path.
+// Login comes back to the same tab, and to an edit opened from a chat card. Anything
+// else falls back to the app root; the path is rebuilt from an allowlist, never echoed.
+const RETURN_TAB = /^\/app\/(?:summary|analysis|transactions|savings|settings)?$/;
+const RETURN_EDIT = /^\?edit=[0-9]{1,9}$/;
+
+function returnPath(): string {
+  const { pathname, search } = window.location;
+  if (!RETURN_TAB.test(pathname)) return "/app/";
+  return pathname === "/app/transactions" && RETURN_EDIT.test(search) ? pathname + search : pathname;
+}
+
+// Explicit recovery only, never an automatic login loop. Same-origin return path.
 export function login(): void {
   if (liff.isLoggedIn()) liff.logout();
-  liff.login({ redirectUri: new URL("/app/", window.location.origin).href });
+  liff.login({ redirectUri: new URL(returnPath(), window.location.origin).href });
 }

@@ -34,7 +34,7 @@ vi.mock("../liff", () => ({
   sendToChat: (text: string) => state.chat(text),
 }));
 
-const { EditSheet, bangkokToday } = await import("../components/EditSheet");
+const { EditSheet, bangkokToday, rememberedEdit } = await import("../components/EditSheet");
 
 function renderSheet(fromChat = false) {
   const onClose = vi.fn();
@@ -58,6 +58,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // Close any sheet a test left open so the next one starts clean.
+  rememberedEdit.forget();
   vi.useRealTimers();
 });
 
@@ -212,5 +214,62 @@ describe("EditSheet", () => {
 
   it("uses the Bangkok calendar day for the latest allowed date", () => {
     expect(bangkokToday(new Date("2026-01-03T18:30:00Z"))).toBe("2026-01-04");
+  });
+});
+
+describe("EditSheet review follow-ups", () => {
+  it("names a rejected type", async () => {
+    state.send = vi.fn(async () => { throw new ApiError(422, "INVALID_FIELD", "transaction_type"); });
+    renderSheet();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "บันทึก" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe("ตรวจช่องนี้อีกครั้ง");
+  });
+
+  it("keeps focus inside the sheet and gives it back on close", () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const view = render(<EditSheet id={7} fromChat={false} onClose={() => {}} onChanged={() => {}} />);
+    const dialog = screen.getByRole("dialog");
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>("button, input, select"))
+      .filter((node) => !node.hasAttribute("disabled"));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    last.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    view.unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it("keeps what was typed when the app is hidden and shown again", () => {
+    renderSheet();
+    fireEvent.change(screen.getByLabelText("จำนวนเงิน"), { target: { value: "70" } });
+    cleanup(); // hiding the app unmounts every screen
+    expect(rememberedEdit()).toEqual({ id: 7, fromChat: false });
+    renderSheet();
+    expect((screen.getByLabelText("จำนวนเงิน") as HTMLInputElement).value).toBe("70");
+  });
+
+  it("forgets the draft once the sheet is closed", () => {
+    renderSheet();
+    fireEvent.change(screen.getByLabelText("จำนวนเงิน"), { target: { value: "70" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "ปิด" })[0]);
+    expect(rememberedEdit()).toBeNull();
+    cleanup();
+    renderSheet();
+    expect((screen.getByLabelText("จำนวนเงิน") as HTMLInputElement).value).toBe("50.00");
+  });
+
+  it("offers a real category for a row saved without one", () => {
+    state.item = { ...ITEM, category: "" };
+    renderSheet();
+    expect(options()).toEqual(["อาหาร", "เดินทาง", "อื่นๆ"]);
+    expect((screen.getByLabelText("หมวด") as HTMLSelectElement).value).toBe("อื่นๆ");
   });
 });
