@@ -37,6 +37,9 @@ Editing or deleting a row drops a pending `confirm_delete` on it. ✏️ on chat
 After a save opened from a card, the sheet posts `แก้รายการ #<id> แล้ว` as the user via
 `liff.sendMessages` (needs the LIFF `chat_message.write` scope in the LINE console);
 `app.EDIT_RECEIPT` answers it before any pending-state read with a fresh "แก้แล้ว" card.
+LINE cannot change a sent card, so both edit paths save what they replaced in
+`transactions.edited_from`/`edited_at`, and for `repository.EDIT_DIFF_WINDOW` (10 min) the
+"แก้แล้ว" card strikes the changed old values through (`flex._replaced_line`).
 
 Chat cards: `handle_text_message`/`handle_postback` return `str | Reply` (`replies.py`:
 text = altText, optional Flex card and quick replies). `flex.py` builds cards (pure JSON;

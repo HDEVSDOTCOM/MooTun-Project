@@ -58,6 +58,29 @@ def init_db(db_engine: Engine | None = None) -> None:
     _upgrade_webhook_event_table(active_engine)
     _upgrade_pending_transaction_table(active_engine)
     _upgrade_pending_action_table(active_engine)
+    _upgrade_transaction_table(active_engine)
+
+
+def _upgrade_transaction_table(db_engine: Engine) -> None:
+    """Add the edit snapshot columns behind the struck-through "แก้แล้ว" card."""
+
+    table_name = "transactions"
+    columns = {column["name"] for column in inspect(db_engine).get_columns(table_name)}
+    timestamp_type = (
+        "TIMESTAMP WITH TIME ZONE"
+        if db_engine.dialect.name == "postgresql"
+        else "DATETIME"
+    )
+    additions = {"edited_from": "TEXT", "edited_at": timestamp_type}
+    statements = [
+        f"ALTER TABLE {table_name} ADD COLUMN {name} {sql_type}"
+        for name, sql_type in additions.items()
+        if name not in columns
+    ]
+    if statements:
+        with db_engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
 
 
 def _upgrade_webhook_event_table(db_engine: Engine) -> None:

@@ -373,7 +373,7 @@ def _apply_edit(owner: str, tx_id: int, raw: bytes) -> dict:
                 owner, tx_id,
                 transaction_type=fields.transaction_type, amount=fields.amount_baht,
                 category=fields.category, description=fields.description,
-                occurred_on=fields.occurred_on, session=session,
+                occurred_on=fields.occurred_on, session=session, now=utc_now(),
             )
             if item is None:
                 raise WebAppError(404, "NOT_FOUND")

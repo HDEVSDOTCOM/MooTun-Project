@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final, Mapping
 
-from messages import _clean, _decimal, _format_date, format_amount
+from messages import _clean, _format_date, edit_changes, format_amount, signed_amount
 from postback import HELP_TOPICS
 
 BRAND: Final = "#D81B72"
@@ -57,17 +57,25 @@ def transaction_card(
     *,
     liff_id: str | None,
     image_url: str | None,
+    before: Mapping[str, object] | None = None,
 ) -> dict:
-    """Card for a recorded, edited or restored transaction."""
+    """Card for a recorded, edited or restored transaction.
+
+    ``before`` (edit only) is what the edit replaced; changed old values are struck through,
+    since LINE cannot change the card the user saw before.
+    """
 
     if variant not in ("record", "edit", "restore"):
         raise ValueError(f"unknown card variant: {variant}")
+    if before is not None and variant != "edit":
+        raise ValueError("only the edit card shows replaced values")
     buttons = []
     if liff_id:
         buttons.append(_icon_button("✏️", {"type": "uri", "label": "แก้ไข",
                                           "uri": f"https://liff.line.me/{liff_id}/transactions?edit={int(tx['id'])}"}))
     buttons.append(_icon_button("🗑️", {"type": "postback", "label": "ลบ", "data": f"a=del&t={int(tx['id'])}"}))
-    return _bubble(variant, tx, total, image_url, amount_struck=False, buttons=buttons)
+    return _bubble(variant, tx, total, image_url, amount_struck=False, buttons=buttons,
+                   replaced=edit_changes(before, tx))
 
 
 def deleted_card(tx: Mapping[str, object], total: MonthTotal, *, action_id: str, image_url: str | None) -> dict:
@@ -107,14 +115,29 @@ def _message_items(*labels: str) -> tuple[dict, ...]:
     return tuple({"type": "action", "action": {"type": "message", "label": label, "text": label}} for label in labels)
 
 
-def _bubble(variant, tx, total, image_url, *, amount_struck: bool, buttons: list[dict]) -> dict:
+def _replaced_line(changes: list[str]) -> list[dict]:
+    """"เดิม" followed by each replaced value struck through."""
+
+    if not changes:
+        return []
+    spans: list[dict] = [{"type": "span", "text": "เดิม ", "color": MUTED}]
+    for index, value in enumerate(changes):
+        if index:
+            spans.append({"type": "span", "text": " · ", "color": MUTED})
+        spans.append({"type": "span", "text": value, "color": STRUCK, "decoration": "line-through"})
+    return [{"type": "text", "text": "เดิม " + " · ".join(changes), "contents": spans, "size": "xs",
+             "wrap": True, "maxLines": 3, "margin": "sm"}]
+
+
+def _bubble(variant, tx, total, image_url, *, amount_struck: bool, buttons: list[dict],
+            replaced: list[str] | None = None) -> dict:
     income = str(tx.get("type")) == "income"
     kind = "รายรับ" if income else "รายจ่าย"
     accent = INCOME if income else BRAND
     category = _clean(tx.get("category"), "ไม่ระบุหมวด")
     note = _clean(tx.get("note"), "")
     item = note if note and note != "ไม่ระบุรายการ" else category
-    amount = f"{'+' if income else '-'}฿{format_amount(abs(_decimal(tx.get('amount', 0))))}"
+    amount = signed_amount(tx)
     title, subtitle = _HEADINGS[variant]
 
     header_contents: list[dict] = [{
@@ -161,6 +184,7 @@ def _bubble(variant, tx, total, image_url, *, amount_struck: bool, buttons: list
                 *buttons,
             ],
         },
+        *_replaced_line(replaced or []),
         {"type": "separator", "margin": "lg"},
         *_month_block(category, total, kind, accent),
     ]

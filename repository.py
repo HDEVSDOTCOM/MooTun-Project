@@ -6,6 +6,7 @@ hashed capability joined to its owner's transactions in one SQL statement.
 
 from __future__ import annotations
 
+import json
 import secrets
 from calendar import monthrange
 from contextlib import nullcontext
@@ -368,6 +369,7 @@ def update_latest_transaction(
     description: str | None = None,
     occurred_on: date | datetime | None = None,
     session: Session | None = None,
+    now: datetime | None = None,
 ) -> Transaction | None:
     """Replace every field of the user's most recently entered transaction.
 
@@ -386,6 +388,7 @@ def update_latest_transaction(
         raise ValueError("category is required")
     if isinstance(occurred_on, datetime):
         occurred_on = occurred_on.date()
+    amount_satang = baht_to_satang(amount)
 
     statement = (
         select(Transaction)
@@ -400,8 +403,9 @@ def update_latest_transaction(
         item = db.scalar(statement)
         if item is None:
             return None
+        _remember_before_edit(item, now)
         item.transaction_type = kind
-        item.amount_satang = baht_to_satang(amount)
+        item.amount_satang = amount_satang
         item.category = category_value
         item.description = (
             description.strip() if description and description.strip() else None
@@ -410,6 +414,47 @@ def update_latest_transaction(
             item.occurred_on = occurred_on
         db.flush()
         return item
+
+
+# A receipt arrives seconds after the save; an older snapshot no longer describes "this" edit.
+EDIT_DIFF_WINDOW = timedelta(minutes=10)
+
+
+def _remember_before_edit(item: Transaction, now: datetime | None) -> None:
+    item.edited_from = json.dumps(
+        {
+            "type": item.transaction_type,
+            "amount_satang": item.amount_satang,
+            "category": item.category,
+            "description": item.description,
+            "occurred_on": item.occurred_on.isoformat(),
+        },
+        ensure_ascii=False,
+    )
+    item.edited_at = now or datetime.now(timezone.utc)
+
+
+def recent_edit_before(item: Transaction, *, now: datetime) -> dict[str, Any] | None:
+    """The values the latest edit replaced, shaped like card data, if that edit is recent."""
+
+    edited_at = item.edited_at
+    if not item.edited_from or edited_at is None:
+        return None
+    if edited_at.tzinfo is None:
+        edited_at = edited_at.replace(tzinfo=timezone.utc)
+    if not timedelta(0) <= now - edited_at <= EDIT_DIFF_WINDOW:
+        return None
+    try:
+        data = json.loads(item.edited_from)
+        return {
+            "type": str(data["type"]),
+            "amount": Decimal(int(data["amount_satang"])) / Decimal(100),
+            "category": str(data["category"]),
+            "note": data.get("description"),
+            "date": date.fromisoformat(data["occurred_on"]),
+        }
+    except (ValueError, TypeError, KeyError):
+        return None
 
 
 def _month_bounds(year: int, month: int) -> tuple[date, date]:
@@ -1361,6 +1406,7 @@ def update_transaction(
     description: str | None,
     occurred_on: date,
     session: Session | None = None,
+    now: datetime | None = None,
 ) -> Transaction | None:
     """Replace every editable field of one of the user's transactions by id."""
 
@@ -1376,6 +1422,7 @@ def update_transaction(
         item = get_transaction(user_id, transaction_id, session=db)
         if item is None:
             return None
+        _remember_before_edit(item, now)
         item.transaction_type = kind
         item.amount_satang = amount_satang
         item.category = category_value

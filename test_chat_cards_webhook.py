@@ -386,3 +386,64 @@ def test_edit_receipt_lookalikes_are_not_receipts(bot, message):
     client, engine, line = bot
     _post(client, text("e1", message))
     assert "แก้แล้ว ✏️" not in json.dumps(_last(line), ensure_ascii=False)
+
+
+def _struck_texts(message) -> list[str]:
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "span" and node.get("decoration") == "line-through":
+                found.append(node["text"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(message)
+    return found
+
+
+def _mini_app_edit(engine, tx_id, *, amount="70", now=None):
+    from datetime import date, datetime, timezone
+    from repository import update_transaction
+    with Session(engine) as session:
+        update_transaction("U-a", tx_id, transaction_type="expense", amount=amount, category="อาหาร",
+                           description="ข้าว", occurred_on=date(2026, 11, 1), session=session,
+                           now=now or datetime.now(timezone.utc))
+        session.commit()
+
+
+def test_edit_receipt_strikes_through_the_replaced_amount(bot):
+    client, engine, line = bot
+    _post(client, text("e1", "ข้าว 50 1/11/2569"))
+    tx = _only_tx(engine)[0]
+    _mini_app_edit(engine, tx.id)
+
+    _post(client, text("e2", f"แก้รายการ #{tx.id} แล้ว"))
+
+    message = _last(line)
+    assert _struck_texts(message) == ["-฿50"]
+    assert "เดิม: -฿50" in message["altText"]
+    assert "-฿70" in json.dumps(message, ensure_ascii=False)
+
+
+def test_late_edit_receipt_shows_no_old_values(bot):
+    from datetime import datetime, timedelta, timezone
+    client, engine, line = bot
+    _post(client, text("e1", "ข้าว 50 1/11/2569"))
+    tx = _only_tx(engine)[0]
+    _mini_app_edit(engine, tx.id, now=datetime.now(timezone.utc) - timedelta(minutes=11))
+
+    _post(client, text("e2", f"แก้รายการ #{tx.id} แล้ว"))
+
+    assert _struck_texts(_last(line)) == []
+    assert "เดิม" not in _last(line)["altText"]
+
+
+def test_chat_edit_card_strikes_through_the_old_amount(bot):
+    client, engine, line = bot
+    _post(client, text("e1", "ข้าว 50"))
+    _post(client, text("e2", "แก้ ข้าว 60"))
+    assert _struck_texts(_last(line)) == ["-฿50"]
